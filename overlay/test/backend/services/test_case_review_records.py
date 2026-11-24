@@ -338,7 +338,7 @@ def test_review_uses_model_thinking_switch_and_streams_only_public_activity():
 
     client = Mock()
     create = client.chat.completions.create
-    model = NS(model_name="deepseek-flash", enable_thinking=True, max_output_tokens=8192)
+    model = NS(model_name="deepseek-flash", enable_thinking=True, max_output_tokens=32768)
     chunks = [
         NS(choices=[NS(delta=NS(reasoning_content="private", content=None), finish_reason=None)]),
         NS(choices=[NS(delta=NS(content='{"ok": true}'), finish_reason="stop")]),
@@ -347,8 +347,10 @@ def test_review_uses_model_thinking_switch_and_streams_only_public_activity():
     notes = []
     assert ask(client, model, "review", [], activity=notes.append) == {"ok": True}
     assert create.call_args.kwargs["extra_body"]["thinking"]["type"] == "enabled"
+    assert create.call_args.kwargs["max_tokens"] == 32768
     assert len(notes) == 1 and "private" not in notes[0]
     model.enable_thinking = False
     create.return_value = NS(choices=[NS(message=NS(content='{"ok": true}'), finish_reason="stop")])
     assert ask(client, model, "review", []) == {"ok": True}
     assert create.call_args.kwargs["extra_body"]["thinking"]["type"] == "disabled"
+    assert create.call_args.kwargs["max_tokens"] == 32768

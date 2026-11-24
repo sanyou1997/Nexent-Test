@@ -116,6 +116,10 @@ def tenant(command, email, kb, native_export=None):
             "nexent-runtime", "python", "-c", helper,
             input=json.dumps(request).encode(), stdout=subprocess.PIPE)
     result = json.loads(p.stdout.decode().strip().splitlines()[-1])
+    if command == "review-settings":
+        print("Review limits are already published." if result["published"] else
+              "Review draft ready. Publish the agent in Nexent to apply the new limits.")
+        return
     if command == "seed":
         print("Model catalog and parser defaults are ready.")
         return
@@ -143,7 +147,7 @@ def tenant(command, email, kb, native_export=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["prepare", "start", "seed", "agent", "bind"])
+    parser.add_argument("command", choices=["prepare", "start", "seed", "agent", "bind", "review-settings"])
     parser.add_argument("--account", help="Registered destination Nexent administrator email")
     parser.add_argument("--agent-export", type=Path, help="Native review agent JSON to rebind with the agent command")
     parser.add_argument("--kb", default="纪检审理本地法规库")

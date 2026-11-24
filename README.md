@@ -40,7 +40,7 @@ python -X utf8 restore.py start
    ```
 
 4. 在“MCP 仓库”添加 SSE 服务，名称填 **review_rules**，地址填 `http://review-rules:8096/sse`，刷新后应看见 `get_rule` 和 `review_report`。在“智能体配置”导入 `.local/agent.json`。在导入向导选择新电脑的对话模型，确认知识库和两项 MCP 工具均选中，在目标租户将分类标签设为 **纪检监察**，如使用 DeepSeek 并希望启用审理思考，在该智能体所选模型的参数中开启思考，再发布“纪委案件审理辅助”。首次导入使用原始智能体名称。
-5. 绑定已发布版本，让审理流程使用本账号的法规 MCP。模型和文件解析设置由新系统管理。
+5. 绑定已发布版本，让审理流程使用本账号的法规 MCP。目标机选用官方 DeepSeek Flash 时，可按下方“已安装电脑更新”应用同一组审理参数。
 
    ```powershell
    python -X utf8 restore.py bind --account $account
@@ -75,6 +75,12 @@ python -X utf8 restore.py start
 ```
 
 该命令重新应用覆盖文件并更新本项目服务。已生成的 `.env`、租户映射和法规文件地址保存在该电脑的 `.local/`，数据库与索引保存在相应的本机持久化存储。日常更新同一账号无需重复导入智能体。若九份法规文件发生变化，应在知识库更新对应原件、完成索引并重新运行 `agent`。若智能体、模型或知识库被重建，应重新核对目标绑定并发布。
+
+使用官方 DeepSeek Flash 的审理智能体，可用创建该智能体的账号运行下面的命令。脚本按本机模型 ID 写入审理草稿，开启思考，设置输入上限 65,536、单次输出上限 32,768、上下文窗口 98,304 tokens。出现 `Review draft ready` 后，到“智能体配置”核对草稿并点击“发布”，再新建对话测试。出现 `already published` 表示这组参数已经生效。模型接口、密钥和文件解析均由目标机管理。其他模型可在智能体编辑页按实际服务容量设置。
+
+```powershell
+python -X utf8 restore.py review-settings --account $account
+```
 
 ## 数据库与账号的关系
 

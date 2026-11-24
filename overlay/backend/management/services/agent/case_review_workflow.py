@@ -392,7 +392,7 @@ def ask(client, model, instruction, payload, *, split_depth=0, activity=None, ch
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ],
         response_format={"type": "json_object"},
-        max_tokens=(model.max_output_tokens or 8192) if thinking else 7500,
+        max_tokens=model.max_output_tokens or (8192 if thinking else 7500),
         temperature=0,
         **(
             {"extra_body": {"thinking": {"type": "enabled" if thinking else "disabled"}}}
