@@ -30,10 +30,6 @@ with get_db_session() as db:
         result = {"models": len(request["models"])}
     elif mode == "agent":
         index = get_index_name_by_knowledge_name(request["kb"], tenant)
-        model_id = db.execute(text("""
-            SELECT model_id FROM nexent.model_record_t WHERE tenant_id=:tenant
-            AND display_name='deepseek-flash' AND delete_flag='N'
-        """), args).scalar_one()
         docs = db.execute(text("""
             SELECT original_filename,bucket_name,object_name FROM nexent.knowledge_file_lifecycle_t
             WHERE tenant_id=:tenant AND index_name=:idx AND status='COMPLETED' AND delete_flag='N'
@@ -53,17 +49,12 @@ with get_db_session() as db:
         expected_names = {s.split("/", 1)[1] for s in request["hashes"] if s.startswith("入库文档/")}
         if set(locations) != expected_names:
             raise ValueError("Upload and finish indexing: " + ", ".join(sorted(expected_names - set(locations))))
-        result = dict(tenant=tenant, model_id=model_id, index=index, locations=locations)
+        result = dict(tenant=tenant, index=index, locations=locations)
     elif mode == "bind":
         agent, version = db.execute(text("""
             SELECT agent_id, current_version_no FROM nexent.ag_tenant_agent_t WHERE
             tenant_id=:tenant AND name='discipline_case_review' AND version_no=0 AND current_version_no>0 AND delete_flag='N'
         """), args).one()
-        db.execute(text("""
-            INSERT INTO nexent.document_parser_settings(tenant_id,agent_id,settings,updated_by)
-            VALUES(:tenant,:agent,CAST(:settings AS jsonb),:actor)
-            ON CONFLICT (tenant_id,agent_id) DO NOTHING
-        """), dict(args,agent=agent,settings=json.dumps(request["parser"]["agent"])))
         result = dict(tenant=tenant, agent=agent, version=version)
     else:
         raise ValueError(mode)

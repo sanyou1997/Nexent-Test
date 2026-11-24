@@ -4,7 +4,7 @@
 
 ## 新电脑首次安装
 
-以下命令在 PowerShell 执行。首次使用先克隆项目。
+新电脑只需取得本仓库。审理智能体模板、9 份法规原文和法规 MCP 都在 Git 中。10.4 GB 的旧机本地服务包是可选备份，可以跳过。若要带走在界面里另行修改过的提示词或工具设置，额外复制最新导出的智能体 JSON。以下命令在 PowerShell 执行。首次使用先克隆项目。
 
 ```powershell
 git clone https://github.com/sanyou1997/Nexent-Test.git
@@ -22,39 +22,35 @@ python -X utf8 restore.py start
 
 ### 恢复账号内的配置
 
-1. 在新系统注册目标管理员，登录一次。设定目标邮箱并导入 PostgreSQL 配置种子。种子会补齐模型目录和租户文件解析默认设置，重复运行保留已有记录。
+1. 在新系统注册并登录目标账号。在“模型配置”添加新环境可用的对话模型和向量模型，分别测试连通。对话模型供智能体调用，向量模型用于建立法规知识库。按需要在“文件解析”配置本机或内网的 OCR、ASR 服务。
+
+2. 在“知识库配置”创建 **纪检审理本地法规库**，选择刚配置的向量模型。上传 [入库文档目录](review/本地法规库/入库文档) 中全部 **9 个 TXT**，等待全部处理完成。文件名和原始字节用于核验，请保留原版。
+
+3. 在仓库根目录生成该账号的智能体导入文件。程序逐份验证目标账号可读取的原件，写入该系统的法规原件位置和检索索引，供站内定位、标黄使用。若知识库改了名字，在命令后追加 `--kb "新名称"`。
 
    ```powershell
-   $account = Read-Host "新系统的管理员邮箱"
-   python -X utf8 restore.py seed --account $account
-   ```
-
-2. 在“模型配置”中给 `deepseek-flash`、`bge-m3` 和需要使用的视觉模型 `qwen3.8-27b` 填写本地实际接口和所需凭据，测试连通后设置默认语言、向量和视觉模型。服务可部署在本机或内网的另一台主机。切换向量模型后需按新模型重新建索引。
-3. 在“知识库配置”创建 **纪检审理本地法规库**，选择可用的 `bge-m3`。上传 [入库文档目录](review/本地法规库/入库文档) 中全部 **9 个 TXT**，等待各文件处理完成。文件名和原始字节用于核验，请保留原版。若知识库改名，下一条命令追加 `--kb "新名称"`。
-4. 生成该租户专用的智能体导入文件。程序会逐份读取目标账号可访问的原件，验证 SHA-256，取得该系统实际的对象地址、模型 ID 和索引名。
-
-   ```powershell
+   $account = Read-Host "新系统的账号邮箱"
    python -X utf8 restore.py agent --account $account
    ```
 
-   如果在原系统修改过审理智能体，可在“智能体配置 → 纪委案件审理辅助 → 更多操作 → 导出”保存最新 JSON，然后用下面的命令代替上面的命令。它保留这份 JSON 的提示词、示例问题、模型参数和工具配置，把模型、法规库索引和法规 MCP 地址换成目标系统的值。此入口适用于本项目的单智能体、单法规库、`deepseek-flash` 和 `review_rules` 配置。
+   如果带了最新的智能体导出 JSON，可将上一条 Python 命令替换为下面这条。两种方式都在目标系统的导入向导里选择对话模型，推理参数使用新环境的设置。
 
    ```powershell
    python -X utf8 restore.py agent --account $account --agent-export "D:/迁移/纪委案件审理辅助.json"
    ```
 
-5. 在“MCP 仓库”添加 SSE 服务，名称填 **review_rules**，地址填 `http://review-rules:8096/sse`，刷新后应看见 `get_rule` 和 `review_report`。在“智能体配置”导入 `.local/agent.json`。确认模型、知识库和两项 MCP 工具均选中，在目标租户将分类标签设为 **纪检监察**，再发布“纪委案件审理辅助”。首次导入使用原始智能体名称。
-6. 绑定已发布版本并启用该智能体的文件解析。到图形界面的“文件解析”核对本机服务地址并测试连接。
+4. 在“MCP 仓库”添加 SSE 服务，名称填 **review_rules**，地址填 `http://review-rules:8096/sse`，刷新后应看见 `get_rule` 和 `review_report`。在“智能体配置”导入 `.local/agent.json`。在导入向导选择新电脑的对话模型，确认知识库和两项 MCP 工具均选中，在目标租户将分类标签设为 **纪检监察**，再发布“纪委案件审理辅助”。首次导入使用原始智能体名称。
+5. 绑定已发布版本，让审理流程使用本账号的法规 MCP。模型和文件解析设置由新系统管理。
 
    ```powershell
    python -X utf8 restore.py bind --account $account
    ```
 
-7. 在智能体对话中上传 [8 页工程结算样例](examples/02_工程变更结算与关联服务转款.pdf)，输入“请帮我审理下这份报告并出具意见”。默认显示总览、审理结论、引用核查、办理建议。检查流水去重为 6 笔、66,000 元，扣除 5,400 元退款后净流入 60,600 元。点击法规链接，应在站内原文中定位并标黄。需要逐笔来源时，随报告明确要求“逐笔核验明细”。
+6. 先将 [购物卡案例](examples/购物卡案.txt) 的全文粘贴到智能体对话，检查审理意见及法规链接能否定位并标黄。需要审理 PDF 时，在“文件解析”验证目标服务并为该智能体启用 PDF 解析，再上传 [8 页工程结算样例](examples/02_工程变更结算与关联服务转款.pdf)，输入“请帮我审理下这份报告并出具意见”。默认显示总览、审理结论、引用核查、办理建议。检查流水去重为 6 笔、66,000 元，扣除 5,400 元退款后净流入 60,600 元。点击法规链接，应在站内原文中定位并标黄。需要逐笔来源时，随报告明确要求“逐笔核验明细”。
 
-### 本地 OCR、ASR 和模型服务
+### 可选备份：复用旧电脑的本地推理服务
 
-在新电脑单独复制 `Nexent-Local-Services-20261123-linux-amd64.zip`。仓库附有逐文件 SHA-256 清单和导入程序。在项目根目录执行以下命令，路径换成实际位置。
+仅在需要复用旧电脑的 5 个 OCR、ASR 和向量服务镜像时，才单独复制 `Nexent-Local-Services-20261123-linux-amd64.zip`。仓库附有逐文件 SHA-256 清单和导入程序。在项目根目录执行以下命令，路径换成实际位置。
 
 ```powershell
 python -X utf8 offline/import_bundle.py "D:/迁移/Nexent-Local-Services-20261123-linux-amd64.zip"
@@ -65,7 +61,7 @@ docker compose -p nexent-models -f restore/local-services.yaml up -d --pull neve
 
 第二条命令适用于可将 NVIDIA GPU 分配给 Linux 容器的 x86-64 电脑，启动 MinerU、BGE-M3 和 Paraformer（含 FSMN-VAD、CT-Punc），宿主机端口分别为 18001、11435、18095。仅运行 CPU 语音服务时，在命令末尾加 `paraformer`。包内也有 Qwen3-ASR 和 Umi-OCR 镜像，按下方各自说明启用 Compose 服务即可跳过单独的镜像导入步骤。DeepSeek 和视觉模型沿用客户可访问的推理接口，需在新租户填写地址和凭据。Nexent 基础镜像及首次构建依赖按上方安装步骤获取。
 
-种子中的 MinerU、Paraformer ASR 地址使用 Docker 容器访问宿主机的示例端口 18001、18095。目标电脑需部署相应服务，或在“文件解析”中选用可访问的内网提供方。使用其他地址时，在目标部署中同步配置相应服务允许访问的来源。项目提供 Qwen ASR 适配和服务源码，另附 [Qwen ASR 部署说明](offline/Qwen3-ASR本地部署.md) 和 [Umi-OCR 部署说明](offline/Umi-OCR本地部署.md)。使用本次配套 ZIP 可一次转移这些本地服务的镜像与权重，校验文件在 `offline/`。
+旧环境示例中的 MinerU、Paraformer ASR 使用宿主机端口 18001、18095。目标电脑需部署相应服务，或在“文件解析”中选用可访问的内网提供方。使用其他地址时，在目标部署中同步配置相应服务允许访问的来源。项目提供 Qwen ASR 适配和服务源码，另附 [Qwen ASR 部署说明](offline/Qwen3-ASR本地部署.md) 和 [Umi-OCR 部署说明](offline/Umi-OCR本地部署.md)。使用本次配套 ZIP 可一次转移这些本地服务的镜像与权重，校验文件在 `offline/`。
 
 ## 已安装电脑更新
 
@@ -85,8 +81,8 @@ python -X utf8 restore.py start
 | 内容 | 随 Git 交付 | 还原位置 |
 | --- | --- | --- |
 | 系统改动、数据库迁移、测试用例 | `overlay/` 和固定上游版本 | `.local/nexent` |
-| 模型参数、文件解析设置 | `database/test-seed.sql`、`review/models.json`、`review/parser.json` | 新账号所属租户的 PostgreSQL 记录 |
-| 智能体提示词、模型覆盖参数、工具、开场白 | `review/agent.template.json` | 按目标 ID 生成后在平台导入并发布 |
+| 对话模型、向量模型、推理参数、文件解析 | 在新机按现场环境配置 | 新账号的“模型配置”和“文件解析”；常规迁移跳过旧环境的 `seed` 命令 |
+| 智能体提示词、工具、开场白 | `review/agent.template.json` | 按目标 ID 生成后在平台导入并发布 |
 | 法规快照、条文和文件校验值 | `review/本地法规库` | 目标 MinIO 原件、Elasticsearch 索引及本地法规 MCP |
 | 验收材料 | `examples/` | 新账号可重新发起审理 |
 | 密码、令牌、接口密钥、聊天记录、其余租户和 Docker 数据卷 | 仅在原部署 | 若需要原样迁机，另行私下备份业务 PostgreSQL、Supabase Auth、MinIO、搜索索引和部署密钥 |

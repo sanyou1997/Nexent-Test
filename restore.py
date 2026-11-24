@@ -82,36 +82,32 @@ def start():
 def review_agent(template, target, native_export=None):
     data = read(native_export) if native_export else template
     agent = data["agent_info"][str(data["agent_id"])]
-    source_models = agent.get("model_ids") or []
     if (len(data["agent_info"]) != 1 or agent["name"] != "discipline_case_review"
-            or agent.get("model_names") != ["deepseek-flash"] or len(source_models) > 1
             or agent.get("managed_agents") or agent.get("skill_names")
-            or agent.get("business_logic_model_id") or agent.get("business_logic_model_name")
             or [m["mcp_server_name"] for m in data["mcp_info"]] != ["review_rules"]):
-        raise ValueError("This restore profile supports the single discipline_case_review agent with deepseek-flash and review_rules.")
-    override_key = str(source_models[0]) if source_models else "deepseek-flash"
-    overrides = agent.get("model_params_override") or {}
-    if set(overrides) - {override_key}:
-        raise ValueError("Unrecognized model parameter binding")
+        raise ValueError("This restore profile supports the single discipline_case_review agent with review_rules.")
     data["mcp_info"] = template["mcp_info"]
     agent["author"] = template["agent_info"]["1"]["author"]
     agent["tenant_id"] = target["tenant"]
-    agent["model_ids"] = [target["model_id"]]
-    agent["model_params_override"] = {str(target["model_id"]): overrides[override_key]} if overrides else {}
+    # The import wizard selects a model from the destination tenant.
+    agent.update(model_ids=[], model_names=[], business_logic_model_id=None,
+                 business_logic_model_name=None, model_params_override={}, requested_output_tokens=None)
     for tool in agent["tools"]:
         if tool["class_name"] == "KnowledgeBaseSearchTool":
             if len(tool["params"].get("index_names") or []) > 1:
                 raise ValueError("This restore profile binds one review knowledge base")
             tool["params"]["index_names"] = [target["index"]]
+            tool["params"].update(rerank=False, rerank_model_name="")
     return data
 
 
 def tenant(command, email, kb, native_export=None):
     cfg = ROOT / "review"
     hashes = read(cfg / "本地法规库/snapshot-hashes.json")
-    request = dict(command=command, email=email, kb=kb, models=read(cfg / "models.json"),
-                   parser=read(cfg / "parser.json"), hashes=hashes["files"],
-                   sql=(ROOT / "database/test-seed.sql").read_text(encoding="utf-8"))
+    request = dict(command=command, email=email, kb=kb, hashes=hashes["files"])
+    if command == "seed":
+        request.update(models=read(cfg / "models.json"), parser=read(cfg / "parser.json"),
+                       sql=(ROOT / "database/test-seed.sql").read_text(encoding="utf-8"))
     if command == "bind" and not (LOCAL / "review-owner.json").exists():
         raise SystemExit("Generate agent.json before binding.")
     request["expected_tenant"] = read(LOCAL / "review-owner.json") if (LOCAL / "review-owner.json").exists() else None
