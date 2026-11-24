@@ -75,14 +75,27 @@ def test_verified_sources_rejects_wrong_text_and_foreign_file(monkeypatch):
     monkeypatch.setattr(workflow, "sse_client", connection)
     monkeypatch.setattr(workflow, "ClientSession", session)
 
-    def verify():
-        return asyncio.run(workflow.verified_sources({"url": "local-test"}, [law]))
+    from unittest.mock import Mock
+    observer = Mock()
 
-    assert verify() == {"K8": law}
+    def verify():
+        observer.reset_mock()
+        records = asyncio.run(workflow.verified_sources({"url": "local-test"}, [law], observer))
+        start, end = observer.add_message.call_args_list
+        assert start.args[1] == workflow.ProcessType.TOOL
+        assert start.kwargs["tool_name"] == "get_rule"
+        assert start.kwargs["tool_arguments"] == {"title": "甲规定（2024年）", "number": 8}
+        assert end.args[1] == workflow.ProcessType.EXECUTION_LOGS
+        assert end.kwargs["tool_call_id"] == start.kwargs["tool_call_id"]
+        return records, end.args[2]
+
+    records, log = verify()
+    assert records == {"K8": law} and "已核对" in log
     reply["text"] = "第八条 不同正文。"
-    assert verify() == {}
+    records, log = verify()
+    assert not records and "未通过" in log
     reply.update(text=law["body"], url="s3://bucket/attachments/other/rule.txt")
-    assert verify() == {}
+    assert verify()[0] == {}
 
 
 def test_date_from_unrelated_evidence_cannot_date_an_event():

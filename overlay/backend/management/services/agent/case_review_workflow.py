@@ -439,7 +439,7 @@ def ask(client, model, instruction, payload, *, split_depth=0):
     return parsed
 
 
-async def verified_sources(connection, requested):
+async def verified_sources(connection, requested, observer=None):
     verified = {}
     if not connection or not requested:
         return verified
@@ -450,18 +450,21 @@ async def verified_sources(connection, requested):
             async with ClientSession(r, w) as session:
                 await session.initialize()
                 for law in requested:
+                    year = re.search(r"\d{4}", law["version"])
+                    if not year:
+                        continue
+                    args = {"title": f"{law['title']}（{year[0]}年）", "number": law["num"]}
+                    call_id = str(uuid4())
+                    outcome = "查询未完成，未采用该条原文。"
+                    if observer is not None:
+                        observer.add_message("", ProcessType.TOOL, "", tool_name="get_rule",
+                                             tool_arguments=args, tool_call_id=call_id)
                     try:
-                        year = re.search(r"\d{4}", law["version"])[0]
-                        response = await asyncio.wait_for(
-                            session.call_tool(
-                                "get_rule",
-                                {
-                                    "title": law["title"] + "（" + year + "年）",
-                                    "number": law["num"],
-                                },
-                            ),
-                            15,
-                        )
+                        response = await asyncio.wait_for(session.call_tool("get_rule", args), 15)
+                        outcome = "返回内容未通过法规原件核验。"
+                        if getattr(response, "isError", False):
+                            outcome = "法规服务返回错误，未采用该条原文。"
+                            continue
                         value = json.loads(response.content[0].text)
                         if (
                             value.get("source_check", {}).get("ok") is True
@@ -474,8 +477,12 @@ async def verified_sources(connection, requested):
                             and compact(value["text"]) == compact(law["body"])
                         ):
                             verified[law["id"]] = law
+                            outcome = "已核对法规名称、版本、施行日期、条号、原件地址和正文。"
                     except (ValueError, IndexError, KeyError, TypeError, TimeoutError):
                         continue
+                    finally:
+                        if observer is not None:
+                            observer.add_message("", ProcessType.EXECUTION_LOGS, outcome, tool_call_id=call_id)
     except Exception as exc:
         logger.warning(
             "case review law verification interrupted: %s", type(exc).__name__
@@ -1269,7 +1276,7 @@ def _review(info, source, user, connection, instructions, detailed, report_sourc
         if r["title"] == title and r["num"] == num and (not y or y in r["version"])
     )
     verified = asyncio.run(
-        verified_sources(connection, [r for r in catalog if r["id"] in chosen])
+        verified_sources(connection, [r for r in catalog if r["id"] in chosen], info.observer)
     )
     stopped()
     for (n, title, num), pairs in counterparts.items():
