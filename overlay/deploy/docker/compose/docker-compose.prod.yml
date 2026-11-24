@@ -72,6 +72,7 @@ services:
     container_name: nexent-config
     restart: always
     volumes:
+      - ../../../backend/management/services/agent/transfer.py:/opt/backend/management/services/agent/transfer.py:ro
       - ../../../backend/management/services/file/local_ocr.py:/opt/backend/management/services/file/local_ocr.py:ro
       - ../../../backend/management/services/file/parser_providers.py:/opt/backend/management/services/file/parser_providers.py:ro
       - ../../../backend/management/services/file/asr.py:/opt/backend/management/services/file/asr.py:ro

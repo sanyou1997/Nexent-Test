@@ -1,0 +1,52 @@
+services:
+  mineru:
+    image: deepanalyze-local-mineru:3.4.4-cuda
+    restart: unless-stopped
+    ports: ["127.0.0.1:18001:8001"]
+    volumes:
+      - ../.local/offline/20261123/models/mineru:/models:ro
+      - mineru-output:/output
+    shm_size: 1gb
+    environment:
+      MINERU_API_OUTPUT_ROOT: /output
+      MINERU_API_MAX_CONCURRENT_REQUESTS: "1"
+      MINERU_VIRTUAL_VRAM_SIZE: "6"
+      MINERU_PROCESSING_WINDOW_SIZE: "16"
+      MINERU_INTRA_OP_NUM_THREADS: "2"
+      MINERU_INTER_OP_NUM_THREADS: "1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              count: all
+  embedding:
+    image: deepanalyze-local-embedding:bge-m3
+    restart: unless-stopped
+    ports: ["127.0.0.1:11435:11435"]
+    volumes:
+      - ../.local/offline/20261123/models/embedding:/models:ro
+    shm_size: 1gb
+    environment:
+      EMBEDDING_BATCH_SIZE: "2"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              count: all
+  paraformer:
+    image: codex-local-asr:1.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:18095:8000"]
+    volumes:
+      - ../.local/offline/20261123/models/paraformer:/opt/asr/models:ro
+      - asr-data:/data
+    environment:
+      MAX_UPLOAD_MB: "256"
+      MAX_AUDIO_SECONDS: "14400"
+      ASR_JOB_TIMEOUT: "7200"
+      ASR_THREADS: "2"
+volumes:
+  mineru-output:
+  asr-data:

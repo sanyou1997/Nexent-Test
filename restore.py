@@ -79,7 +79,34 @@ def start():
             "nexent-northbound", "nexent-web", "review-rules")
 
 
-def tenant(command, email, kb):
+def review_agent(template, target, native_export=None):
+    data = read(native_export) if native_export else template
+    agent = data["agent_info"][str(data["agent_id"])]
+    source_models = agent.get("model_ids") or []
+    if (len(data["agent_info"]) != 1 or agent["name"] != "discipline_case_review"
+            or agent.get("model_names") != ["deepseek-flash"] or len(source_models) > 1
+            or agent.get("managed_agents") or agent.get("skill_names")
+            or agent.get("business_logic_model_id") or agent.get("business_logic_model_name")
+            or [m["mcp_server_name"] for m in data["mcp_info"]] != ["review_rules"]):
+        raise ValueError("This restore profile supports the single discipline_case_review agent with deepseek-flash and review_rules.")
+    override_key = str(source_models[0]) if source_models else "deepseek-flash"
+    overrides = agent.get("model_params_override") or {}
+    if set(overrides) - {override_key}:
+        raise ValueError("Unrecognized model parameter binding")
+    data["mcp_info"] = template["mcp_info"]
+    agent["author"] = template["agent_info"]["1"]["author"]
+    agent["tenant_id"] = target["tenant"]
+    agent["model_ids"] = [target["model_id"]]
+    agent["model_params_override"] = {str(target["model_id"]): overrides[override_key]} if overrides else {}
+    for tool in agent["tools"]:
+        if tool["class_name"] == "KnowledgeBaseSearchTool":
+            if len(tool["params"].get("index_names") or []) > 1:
+                raise ValueError("This restore profile binds one review knowledge base")
+            tool["params"]["index_names"] = [target["index"]]
+    return data
+
+
+def tenant(command, email, kb, native_export=None):
     cfg = ROOT / "review"
     hashes = read(cfg / "本地法规库/snapshot-hashes.json")
     request = dict(command=command, email=email, kb=kb, models=read(cfg / "models.json"),
@@ -100,14 +127,7 @@ def tenant(command, email, kb):
     if owner.exists() and read(owner) != result["tenant"]:
         raise SystemExit("This review MCP snapshot belongs to another tenant. Use a separate deployment.")
     if command == "agent":
-        a = read(cfg / "agent.template.json")
-        agent = a["agent_info"]["1"]
-        agent["tenant_id"] = result["tenant"]
-        agent["model_ids"] = [result["model_id"]]
-        agent["model_params_override"] = {str(result["model_id"]): agent["model_params_override"]["deepseek-flash"]}
-        for tool in agent["tools"]:
-            if tool["class_name"] == "KnowledgeBaseSearchTool":
-                tool["params"]["index_names"] = [result["index"]]
+        a = review_agent(read(cfg / "agent.template.json"), result, native_export)
         snapshot = REVIEW / "本地法规库"
         write(snapshot / "source-locations.json", result["locations"])
         hashes["files"]["source-locations.json"] = hashlib.sha256((snapshot / "source-locations.json").read_bytes()).hexdigest()
@@ -129,8 +149,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["prepare", "start", "seed", "agent", "bind"])
     parser.add_argument("--account", help="Registered destination Nexent administrator email")
+    parser.add_argument("--agent-export", type=Path, help="Native review agent JSON to rebind with the agent command")
     parser.add_argument("--kb", default="纪检审理本地法规库")
     args = parser.parse_args()
+    if args.agent_export and args.command != "agent":
+        parser.error("--agent-export requires the agent command")
     if args.command == "prepare":
         prepare()
     elif args.command == "start":
@@ -138,4 +161,4 @@ if __name__ == "__main__":
     elif not args.account or not PROFILE.exists():
         parser.error("Run prepare/start first and supply --account.")
     else:
-        tenant(args.command, args.account, args.kb)
+        tenant(args.command, args.account, args.kb, args.agent_export)

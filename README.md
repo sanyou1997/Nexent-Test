@@ -37,6 +37,12 @@ python -X utf8 restore.py start
    python -X utf8 restore.py agent --account $account
    ```
 
+   如果在原系统修改过审理智能体，可在“智能体配置 → 纪委案件审理辅助 → 更多操作 → 导出”保存最新 JSON，然后用下面的命令代替上面的命令。它保留这份 JSON 的提示词、示例问题、模型参数和工具配置，把模型、法规库索引和法规 MCP 地址换成目标系统的值。此入口适用于本项目的单智能体、单法规库、`deepseek-flash` 和 `review_rules` 配置。
+
+   ```powershell
+   python -X utf8 restore.py agent --account $account --agent-export "D:/迁移/纪委案件审理辅助.json"
+   ```
+
 5. 在“MCP 仓库”添加 SSE 服务，名称填 **review_rules**，地址填 `http://review-rules:8096/sse`，刷新后应看见 `get_rule` 和 `review_report`。在“智能体配置”导入 `.local/agent.json`。确认模型、知识库和两项 MCP 工具均选中，在目标租户将分类标签设为 **纪检监察**，再发布“纪委案件审理辅助”。首次导入使用原始智能体名称。
 6. 绑定已发布版本并启用该智能体的文件解析。到图形界面的“文件解析”核对本机服务地址并测试连接。
 
@@ -48,7 +54,18 @@ python -X utf8 restore.py start
 
 ### 本地 OCR、ASR 和模型服务
 
-种子中的 MinerU、Paraformer ASR 地址使用 Docker 容器访问宿主机的示例端口 18001、18095。目标电脑需部署相应服务，或在“文件解析”中选用可访问的内网提供方。使用其他地址时，在目标部署中同步配置相应服务允许访问的来源。项目提供 Qwen ASR 适配和服务源码，另附 [Qwen ASR 部署说明](offline/Qwen3-ASR本地部署.md) 和 [Umi-OCR 部署说明](offline/Umi-OCR本地部署.md)。离线部署需另行转移模型权重、OCR/ASR 镜像和相应依赖，校验文件在 `offline/`。
+在新电脑单独复制 `Nexent-Local-Services-20261123-linux-amd64.zip`。仓库附有逐文件 SHA-256 清单和导入程序。在项目根目录执行以下命令，路径换成实际位置。
+
+```powershell
+python -X utf8 offline/import_bundle.py "D:/迁移/Nexent-Local-Services-20261123-linux-amd64.zip"
+docker compose -p nexent-models -f restore/local-services.yaml up -d --pull never
+```
+
+导入程序校验全部文件，将权重和镜像归档写入 `.local/offline/20261123/`，并向 Docker 导入缺少的镜像。同标签已存在其他镜像时会提示冲突。已有同一套服务运行的电脑只需核验压缩包，可在第一条命令末尾加 `--verify-only`。
+
+第二条命令适用于可将 NVIDIA GPU 分配给 Linux 容器的 x86-64 电脑，启动 MinerU、BGE-M3 和 Paraformer（含 FSMN-VAD、CT-Punc），宿主机端口分别为 18001、11435、18095。仅运行 CPU 语音服务时，在命令末尾加 `paraformer`。包内也有 Qwen3-ASR 和 Umi-OCR 镜像，按下方各自说明启用 Compose 服务即可跳过单独的镜像导入步骤。DeepSeek 和视觉模型沿用客户可访问的推理接口，需在新租户填写地址和凭据。Nexent 基础镜像及首次构建依赖按上方安装步骤获取。
+
+种子中的 MinerU、Paraformer ASR 地址使用 Docker 容器访问宿主机的示例端口 18001、18095。目标电脑需部署相应服务，或在“文件解析”中选用可访问的内网提供方。使用其他地址时，在目标部署中同步配置相应服务允许访问的来源。项目提供 Qwen ASR 适配和服务源码，另附 [Qwen ASR 部署说明](offline/Qwen3-ASR本地部署.md) 和 [Umi-OCR 部署说明](offline/Umi-OCR本地部署.md)。使用本次配套 ZIP 可一次转移这些本地服务的镜像与权重，校验文件在 `offline/`。
 
 ## 已安装电脑更新
 
@@ -62,6 +79,8 @@ python -X utf8 restore.py start
 该命令重新应用覆盖文件并更新本项目服务。已生成的 `.env`、租户映射和法规文件地址保存在该电脑的 `.local/`，数据库与索引保存在相应的本机持久化存储。日常更新同一账号无需重复导入智能体。若九份法规文件发生变化，应在知识库更新对应原件、完成索引并重新运行 `agent`。若智能体、模型或知识库被重建，应重新核对目标绑定并发布。
 
 ## 数据库与账号的关系
+
+单独导出的智能体 JSON 可以备份界面里的智能体配置。法条原件、检索索引、引用预览所用的对象地址、MCP 服务程序和模型权重分别保存在其他位置。迁移本项目时先恢复原件和服务，再生成目标租户的智能体 JSON。导入后的最后一步是发布并运行 `bind`。如果只更新同一部署的代码，原有账号和数据卷可以继续使用。
 
 | 内容 | 随 Git 交付 | 还原位置 |
 | --- | --- | --- |
