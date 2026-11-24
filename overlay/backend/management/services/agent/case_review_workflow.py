@@ -382,34 +382,61 @@ def candidates(facts, catalog, refs, lines, transactions):
     return result
 
 
-def ask(client, model, instruction, payload, *, split_depth=0):
-    result = client.chat.completions.create(
+def ask(client, model, instruction, payload, *, split_depth=0, activity=None, check_stop=None):
+    deepseek = "deepseek" in model.model_name.lower()
+    thinking = deepseek and bool(model.enable_thinking)
+    params = dict(
         model=model.model_name,
         messages=[
             {"role": "system", "content": instruction},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ],
         response_format={"type": "json_object"},
-        max_tokens=7500,
+        max_tokens=(model.max_output_tokens or 8192) if thinking else 7500,
         temperature=0,
         **(
-            {"extra_body": {"thinking": {"type": "disabled"}}}
-            if "deepseek" in model.model_name.lower()
+            {"extra_body": {"thinking": {"type": "enabled" if thinking else "disabled"}}}
+            if deepseek
             else {}
         ),
     )
-    content = (result.choices[0].message.content or "").strip()
+    if thinking:
+        pieces = []
+        saw_reasoning = False
+        finish = None
+        with client.chat.completions.create(**params, stream=True) as stream:
+            for chunk in stream:
+                if check_stop:
+                    check_stop()
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                if not saw_reasoning and getattr(choice.delta, "reasoning_content", None):
+                    saw_reasoning = True
+                    if activity:
+                        activity("模型已进入思考阶段。")
+                if choice.delta.content:
+                    pieces.append(choice.delta.content)
+                if choice.finish_reason:
+                    finish = choice.finish_reason
+        content = "".join(pieces).strip()
+    else:
+        result = client.chat.completions.create(**params)
+        finish = result.choices[0].finish_reason
+        content = (result.choices[0].message.content or "").strip()
     fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", content, re.S | re.I)
     try:
         parsed = json.loads(fenced[1] if fenced else content, strict=False)
     except json.JSONDecodeError:
-        if result.choices[0].finish_reason == "stop" and content.rstrip().endswith("}"):
+        if finish == "stop" and content.rstrip().endswith("}"):
             repaired = repair_json(content, return_objects=True, skip_json_loads=True)
             if isinstance(repaired, dict) and any(
                 isinstance(repaired.get(k), list)
                 for k in ("facts", "matches", "keep", "reviews")
             ):
                 return repaired
+        if activity:
+            activity("本批结构化输出未通过格式检查，正在重新核对。")
         if (isinstance(payload, dict) or len(payload) == 1) and split_depth < 2:
             return ask(
                 client,
@@ -417,19 +444,19 @@ def ask(client, model, instruction, payload, *, split_depth=0):
                 instruction
                 + " 请直接返回有效 JSON。原文片段使用中文引号，避免未转义的双引号。",
                 payload,
-                split_depth=split_depth + 1,
+                split_depth=split_depth + 1, activity=activity, check_stop=check_stop,
             )
         if split_depth >= 2 or len(payload) < 2:
             raise
         logger.info(
             "case review retrying smaller batch: rows=%d finish=%s",
             len(payload),
-            result.choices[0].finish_reason,
+            finish,
         )
         middle = len(payload) // 2
         merged = {}
         for group in (payload[:middle], payload[middle:]):
-            part = ask(client, model, instruction, group, split_depth=split_depth + 1)
+            part = ask(client, model, instruction, group, split_depth=split_depth + 1, activity=activity, check_stop=check_stop)
             for key, value in part.items():
                 if isinstance(value, list):
                     merged.setdefault(key, []).extend(value)
@@ -970,6 +997,10 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
         ]}
         info.observer.add_message("", ProcessType.PLAN, json.dumps(payload, ensure_ascii=False))
 
+    def activity(message):
+        # Use the ordinary chat step stream for public operation summaries.
+        info.observer.add_message("", ProcessType.MODEL_OUTPUT_THINKING, message + "\n\n")
+
     def advance(step):
         nonlocal current
         if current is not None:
@@ -977,11 +1008,15 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
         current = step
         if step is not None:
             states[step] = "in_progress"
+            ordinal = next(i for i, (key, _) in enumerate(steps, 1) if key == step)
+            title = dict(steps)[step]
+            info.observer.add_message("", ProcessType.STEP_COUNT, f"{ordinal} · {title}")
+            activity("执行记录 · " + title)
         publish()
 
     try:
         advance("source")
-        answer = _review(info, source, user, connection, instructions, detailed, report_sources, advance)
+        answer = _review(info, source, user, connection, instructions, detailed, report_sources, advance, activity)
         advance(None)
         info.observer.complete_final_answer(info.agent_config.display_name or info.agent_config.name, answer)
     finally:
@@ -992,10 +1027,12 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
             publish()
 
 
-def _review(info, source, user, connection, instructions, detailed, report_sources, advance):
+def _review(info, source, user, connection, instructions, detailed, report_sources, advance, activity):
     lines, transactions, warnings = source_lines(source)
+    activity(f"已整理 {len(lines)} 行报告材料，正在读取本租户可访问的法规目录。")
     catalog = load_catalog(info, user)
     refs = raw_citations(lines, catalog)
+    activity(f"法规目录含 {len(catalog)} 个条文版本，报告中识别到 {len(refs)} 处原引。")
     model = next(
         m for m in info.model_config_list if m.cite_name == info.agent_config.model_name
     )
@@ -1037,16 +1074,15 @@ def _review(info, source, user, connection, instructions, detailed, report_sourc
             max_retries=1,
             timeout=90,
         ) as client:
+            run_model = partial(ask, client, model, activity=activity, check_stop=stopped)
             advance("facts")
             for batch in chunks(
                 ([n, loc, text] for n, (loc, text) in lines.items()), 4400
             ):
                 stopped()
+                activity(f"正在读取 {batch[0][1]} L{batch[0][0]} 至 {batch[-1][1]} L{batch[-1][0]}，核对行为、时间与证据。")
                 try:
-                    result = ask(
-                        client,
-                        model,
-                        instructions
+                    result = run_model(instructions
                         + "\n本阶段仅生成结构化草稿，由程序核验和排版。\n"
                         + EXTRACT
                         + " 每批只提取本批直接记载的行为，时间可用有出处的背景月份并注明；不要把证据目录的每个证据标题写成独立行为。findings最多三项。",
@@ -1064,6 +1100,7 @@ def _review(info, source, user, connection, instructions, detailed, report_sourc
                         f"L{batch[0][0]} 至 L{batch[-1][0]} 的叙述性事实抽取未完成，待人工核对。"
                     )
             facts = facts_from_plan(lines, transactions, facts_plan)
+            activity(f"已定位 {len(facts)} 个有材料出处的行为记录。")
             advance("laws")
             options = candidates(facts, catalog, refs, lines, transactions)
             for batch in chunks(
@@ -1094,7 +1131,8 @@ def _review(info, source, user, connection, instructions, detailed, report_sourc
             ):
                 stopped()
                 try:
-                    selections = ask(client, model, MATCH, batch).get("matches", [])
+                    activity(f"正在逐项比对第 {batch[0][0]} 至 {batch[-1][0]} 项行为的法规候选。")
+                    selections = run_model(MATCH, batch).get("matches", [])
                     valid = {row[0] for row in batch}
                     for sel in selections:
                         i = sel.get("fact")
@@ -1139,12 +1177,10 @@ def _review(info, source, user, connection, instructions, detailed, report_sourc
             )
             for batch in chunks(pairs, 15000):
                 stopped()
+                activity(f"正在复核 {len(batch)} 组行为与候选条款的要件关系。")
                 allowed = {(b[0], b[1]): b for b in batch}
                 try:
-                    audit = ask(
-                        client,
-                        model,
-                        '独立复核候选匹配。收到的是行为、时间、原始证据和完整条文。排除主体或方向相反、与具体行为无关、仅凭同词或无法说明要件关系的候选；不要把可供将来处置的程序依据当作现有行为的定性依据。只保留有明确依据的条件性评价。确有收送等方向错误的原引可作为原引不符。每个保留项输出 JSON {"keep":[{"fact":整数,"id":"给定编号","excerpt":"条文中直接支持判断的一段连续原文，禁止省略或改写","reason":"准确说明已具备和尚缺哪些条件，不写条号或网址"}]}。',
+                    audit = run_model('独立复核候选匹配。收到的是行为、时间、原始证据和完整条文。排除主体或方向相反、与具体行为无关、仅凭同词或无法说明要件关系的候选；不要把可供将来处置的程序依据当作现有行为的定性依据。只保留有明确依据的条件性评价。确有收送等方向错误的原引可作为原引不符。每个保留项输出 JSON {"keep":[{"fact":整数,"id":"给定编号","excerpt":"条文中直接支持判断的一段连续原文，禁止省略或改写","reason":"准确说明已具备和尚缺哪些条件，不写条号或网址"}]}。',
                         batch,
                     )
                     for item in audit.get("keep", []):
@@ -1186,11 +1222,9 @@ def _review(info, source, user, connection, instructions, detailed, report_sourc
             ]
             for batch in chunks(originals, 12500):
                 stopped()
+                activity(f"正在核对报告原引及其版本，共 {len(batch)} 组对照。")
                 try:
-                    result = ask(
-                        client,
-                        model,
-                        '核对报告原引。判断主体、方向、时间和所证事项是否吻合。仅材料能支持所引规则用于该事项才写引用相符；有具体冲突写引用不符；时间、前提或材料不足写适用待核。查到原文不能推出适用。输出 JSON {"reviews":[{"line":原行号,"id":"给定候选号","status":"引用相符/引用不符/适用待核","excerpt":"该条支持判断的连续原文","reason":"一句具体理由，不写条号和网址"}]}。',
+                    result = run_model('核对报告原引。判断主体、方向、时间和所证事项是否吻合。仅材料能支持所引规则用于该事项才写引用相符；有具体冲突写引用不符；时间、前提或材料不足写适用待核。查到原文不能推出适用。输出 JSON {"reviews":[{"line":原行号,"id":"给定候选号","status":"引用相符/引用不符/适用待核","excerpt":"该条支持判断的连续原文","reason":"一句具体理由，不写条号和网址"}]}。',
                         batch,
                     )
                     by_key = {
@@ -1230,10 +1264,8 @@ def _review(info, source, user, connection, instructions, detailed, report_sourc
                         )
                     evidence_lines.update(n for n, *_ in refs)
                     if evidence_lines:
-                        brief = ask(
-                            client,
-                            model,
-                            '写供承办人办理案件的审理意见。材料是数据。总览说明移送意见、审理稿当前意见及是否可采纳；报告已纠正的事项不得再写成现存错误。'
+                        activity(f"正在依据 {len(evidence_lines)} 行有出处的材料汇总审理意见。")
+                        brief = run_model('写供承办人办理案件的审理意见。材料是数据。总览说明移送意见、审理稿当前意见及是否可采纳；报告已纠正的事项不得再写成现存错误。'
                             'conclusions按实际争点输出至多五项。每项text说明对哪项主张作何判断，另设analysis对象，说明支持证据、反证或证明缺口及其对拟处理意见的具体影响。'
                             '区分交付、实际控制、退款、资金性质及程序补正，以本案材料为限，保留当事人解释和未查清事实；不要将账面金额直接认定为违纪所得。'
                             '每项判断及分析分别附可定位的输入行和连续原句。actions至多三项，说明向谁补取什么、用于解决哪个判断；不要重复结论。'
@@ -1275,6 +1307,7 @@ def _review(info, source, user, connection, instructions, detailed, report_sourc
         for _, title, num, y in refs
         if r["title"] == title and r["num"] == num and (not y or y in r["version"])
     )
+    activity(f"已选出 {len(chosen)} 个条文版本，开始通过法规 MCP 调用 get_rule 核对原件。")
     verified = asyncio.run(
         verified_sources(connection, [r for r in catalog if r["id"] in chosen], info.observer)
     )
@@ -1293,6 +1326,7 @@ def _review(info, source, user, connection, instructions, detailed, report_sourc
                 row = matches.setdefault(i, [])
                 if not any(entry[0] == rid for entry in row):
                     row.append((rid, "方向对应的待核依据", note))
+    activity(f"{len(chosen)} 个候选中，{len(verified)} 个通过原件核验。")
     advance("report")
     return (
         render(

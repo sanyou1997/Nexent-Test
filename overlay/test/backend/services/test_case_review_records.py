@@ -314,13 +314,13 @@ def test_review_plan_events_track_work_and_do_not_complete_cancelled_steps(monke
 
     obs = Mock()
     info = SimpleNamespace(observer=obs, agent_config=SimpleNamespace(display_name="审理"))
-    def stop_after_facts(info, source, user, connection, instructions, detailed, sources, advance):
+    def stop_after_facts(info, source, user, connection, instructions, detailed, sources, advance, activity):
         advance("facts")
         raise RunTerminated()
     monkeypatch.setattr(workflow, "_review", stop_after_facts)
     with pytest.raises(RunTerminated):
         workflow.deliver(info, source="", user="u", connection={}, instructions="")
-    events = [json.loads(call.args[2]) for call in obs.add_message.call_args_list]
+    events = [json.loads(call.args[2]) for call in obs.add_message.call_args_list if call.args[1] == workflow.ProcessType.PLAN]
     assert len({event["plan_id"] for event in events}) == 1
     states = [[s["status"] for s in event["steps"]] for event in events]
     assert states == [["in_progress"] + ["pending"] * 5,
@@ -328,3 +328,27 @@ def test_review_plan_events_track_work_and_do_not_complete_cancelled_steps(monke
                       ["completed"] + ["skipped"] * 5]
     assert events[1]["steps"][1]["description"] == "进行中"
     obs.complete_final_answer.assert_not_called()
+
+
+def test_review_uses_model_thinking_switch_and_streams_only_public_activity():
+    from contextlib import nullcontext
+    from types import SimpleNamespace as NS
+    from unittest.mock import Mock
+    from management.services.agent.case_review_workflow import ask
+
+    client = Mock()
+    create = client.chat.completions.create
+    model = NS(model_name="deepseek-flash", enable_thinking=True, max_output_tokens=8192)
+    chunks = [
+        NS(choices=[NS(delta=NS(reasoning_content="private", content=None), finish_reason=None)]),
+        NS(choices=[NS(delta=NS(content='{"ok": true}'), finish_reason="stop")]),
+    ]
+    create.return_value = nullcontext(chunks)
+    notes = []
+    assert ask(client, model, "review", [], activity=notes.append) == {"ok": True}
+    assert create.call_args.kwargs["extra_body"]["thinking"]["type"] == "enabled"
+    assert len(notes) == 1 and "private" not in notes[0]
+    model.enable_thinking = False
+    create.return_value = NS(choices=[NS(message=NS(content='{"ok": true}'), finish_reason="stop")])
+    assert ask(client, model, "review", []) == {"ok": True}
+    assert create.call_args.kwargs["extra_body"]["thinking"]["type"] == "disabled"
