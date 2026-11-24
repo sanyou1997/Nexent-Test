@@ -408,7 +408,7 @@ def ask(client, model, instruction, payload, *, split_depth=0):
                 for k in ("facts", "matches", "keep", "reviews")
             ):
                 return repaired
-        if len(payload) == 1 and split_depth < 2:
+        if (isinstance(payload, dict) or len(payload) == 1) and split_depth < 2:
             return ask(
                 client,
                 model,
@@ -703,7 +703,6 @@ def render_brief(
     law_excerpts=None,
     facts=(),
 ):
-    seen = set()
     locations = {
         loc.split(" · PDF 第")[0] for loc, _ in lines.values() if " · PDF 第" in loc
     }
@@ -714,31 +713,21 @@ def render_brief(
             loc = loc.split(" · ")[-1].removeprefix("PDF ")
         return f"{loc} L{n}"
 
-    def statements(section, limit, items):
-        result = []
+    def grounded(items):
         for item in items if isinstance(items, list) else []:
-            if not isinstance(item, dict):
+            if not isinstance(item, dict) or not isinstance(item.get("text"), str):
                 continue
-            text = safe(item["text"]) if isinstance(item.get("text"), str) else ""
+            text = safe(item["text"])
             evidence = cited(lines, item.get("evidence"))
-            if not text or not evidence:
-                continue
-            places = list(dict.fromkeys(place(n) for n, _ in evidence))
-            sentence = text.rstrip("。") + "。（" + "、".join(places[:2]) + "）"
-            analysis = item.get("analysis")
-            if section == "conclusions" and isinstance(analysis, dict):
-                basis = cited(lines, analysis.get("evidence"))
-                reasoning = safe(analysis["text"]) if isinstance(analysis.get("text"), str) else ""
-                if basis and reasoning and reasoning != text:
-                    sentence += "  \n**审理分析**　" + reasoning.rstrip("。") + "。（" + "、".join(dict.fromkeys(place(n) for n, _ in basis[:2])) + "）"
-            if section in {"overview", "conclusions"}:
-                excerpt = report_excerpt(lines, evidence, report_sources or {}, seen)
-                if excerpt:
-                    sentence += "  \n" + excerpt
-            result.append(sentence)
-            if len(result) >= limit:
-                break
-        return list(dict.fromkeys(result))[:limit]
+            if text and evidence:
+                yield item, text, evidence
+
+    def places(evidence):
+        return "、".join(dict.fromkeys(place(n) for n, _ in evidence[:2]))
+
+    def statements(items, limit):
+        return [text.rstrip("。") + "。（" + places(evidence) + "）"
+                for _, text, evidence in grounded(items)][:limit]
 
     def link(law):
         return f"[{source_label(law)}]({law['url']})"
@@ -755,22 +744,13 @@ def render_brief(
         return "  \n条文原文：“" + snippet + ("…" if len(original) > len(snippet) else "") + "”"
 
     law_excerpts = law_excerpts or {}
-    overview = statements("overview", 1, brief.get("overview"))
-    conclusions = statements("conclusions", 5, brief.get("conclusions"))
-    if len(conclusions) < 2:
-        # Reuse the individual evidence checks if the synthesis lost its literal quotes.
-        fallback = []
-        covered = set()
-        for fact in facts:
-            label, issue = safe(fact["label"]), safe(fact["issue"])
-            if not label or not issue or issue in covered or not fact["evidence"]:
-                continue
-            covered.add(issue)
-            evidence = [{"line": n, "quote": q} for n, q in fact["evidence"]]
-            fallback.append({"text": label, "evidence": evidence,
-                             "analysis": {"text": issue, "evidence": evidence}})
-        conclusions.extend(statements("conclusions", 5 - len(conclusions), fallback))
-    actions = statements("actions", 3, brief.get("actions"))
+    overview = statements(brief.get("overview"), 1)
+    if overview:
+        _, _, evidence = next(grounded(brief["overview"]))
+        excerpt = report_excerpt(lines, evidence, report_sources or {}, set())
+        if excerpt:
+            overview[0] += "  \n" + excerpt
+    actions = statements(brief.get("actions"), 3)
     out = ["## 总览", *(overview or ["目前无法形成有材料出处的总体判断，需人工复核。"])]
     total = transaction_totals(transactions)
     if total:
@@ -783,18 +763,16 @@ def render_brief(
                 f"，扣除已列退款 {returned:,} 元后净流入 {balance:,} 元（{place(n)}）"
             )
         out.append(amounts + "。")
-    out += [
-        "",
-        "## 审理结论",
-        *("- " + s for s in conclusions or ["现有核验结果不足以作出分项结论。"]),
-    ]
-    out += ["", "## 引用核查"]
-    printed = set()
+    out.append("## 分项审理意见")
     if not catalog:
         out.append("本轮未读取到可核验的法规原件。请在本对话的“知识库”中选择纪检审理本地法规库或跟随智能体默认，确认账号可访问后重新审理。")
     elif not verified and (refs or matches):
         out.append("本轮法规原件未通过核验。请核对法规 MCP 连接、原件版本和知识库绑定后重新审理。")
-    for n, title, num, year in dict.fromkeys(refs):
+
+    def original_notes(ref, repeated=False):
+        n, title, num, year = ref
+        notes_out = []
+        included = set()
         possible = [
             r
             for r in catalog
@@ -807,19 +785,19 @@ def render_brief(
         name = f"《{title}》" + (f"（{year}年版）" if year else "") + f"第{num}条"
         if not laws:
             status = "授权原件中未查到" if catalog and not possible else "原件未核实"
-            out.append(f"- **{status}** · {name}{location}。")
-            continue
+            notes_out.append(f"- **{status}** · {name}{location}。")
+            return notes_out, included
         uncertain_version = not year and len(possible) > 1
         if uncertain_version:
-            out.append(
+            notes_out.append(
                 f"- **版本待核** · 原引{name}未注明版本，须按行为时间分别核对。{location}"
             )
         if len(laws) < len(possible):
-            out.append("部分候选版本的原件未核实。")
+            notes_out.append("部分候选版本的原件未核实。")
         notes = dict(assessments.get((n, title, num), []))
         for law in laws:
             rid = law["id"]
-            printed.add(rid)
+            included.add(rid)
             mismatch = direction_mismatch(lines[n][1], law["body"], num)
             status = "引用不符" if mismatch else verdicts.get((n, rid), "适用待核")
             if uncertain_version and status == "引用相符":
@@ -827,35 +805,100 @@ def render_brief(
             reason = (
                 mismatch or notes.get(rid) or "原件载有该条，个案适用条件尚待核实。"
             )
-            out.append(
+            notes_out.append(
                 f"- **{status}** · {link(law)}。{reason}"
                 + ("" if uncertain_version else location)
-                + legal_excerpt(law, law_excerpts.get(("original", n, rid)))
+                + ("" if repeated else legal_excerpt(law, law_excerpts.get(("original", n, rid))))
             )
         for rid, note in notes.items():
             if rid in verified and all(law["id"] != rid for law in laws):
-                printed.add(rid)
-                out.append(f"- **建议比对** · {link(verified[rid])}。{note}")
-    if not refs:
-        out.append("送审材料中未定位到同时写明法规名称和条号的引用。")
-    candidates = Counter(
-        rid
-        for row in matches.values()
-        for rid, kind, _ in row
-        if rid in verified
-        and rid not in printed
-        and kind in ("候选待核", "方向对应的待核依据")
-    )
-    for rid, _ in candidates.most_common(3):
-        fact, reason = next(
-            (fact, safe(reason))
-            for fact, row in matches.items()
-            for key, kind, reason in row
-            if key == rid and kind in ("候选待核", "方向对应的待核依据")
-        )
-        law = verified[rid]
-        out.append(f"- **补充比对（待核）** · {link(law)}。{reason}"
-                   + legal_excerpt(law, law_excerpts.get(("fact", fact, rid))))
+                included.add(rid)
+                notes_out.append(f"- **建议比对** · {link(verified[rid])}。{note}")
+        return notes_out, included
+
+    refs = list(dict.fromkeys(refs))
+    assigned = set()
+    sections = list(grounded(brief.get("conclusions")))[:5]
+    if len(sections) < 2:
+        existing = {text for _, text, _ in sections}
+        for i, fact in enumerate(facts, 1):
+            label, issue = safe(fact["label"]), safe(fact["issue"])
+            if not label or not issue or issue in existing or not fact["evidence"]:
+                continue
+            evidence = [{"line": n, "quote": q} for n, q in fact["evidence"]]
+            item = {"title": label, "text": issue, "evidence": evidence, "fact_ids": [i]}
+            sections.extend(grounded([item]))
+            existing.add(issue)
+            if len(sections) >= 5:
+                break
+
+    for ordinal, (item, judgment, evidence) in enumerate(sections, 1):
+        title = item.get("title")
+        title = safe(title)[:52] if isinstance(title, str) else ""
+        out.append(f"### {ordinal}. {title or '事项核查'}")
+        analysis = item.get("analysis")
+        analysis = analysis if isinstance(analysis, dict) else {}
+        basis = cited(lines, analysis.get("evidence"))
+        reasoning = safe(analysis["text"]) if isinstance(analysis.get("text"), str) else ""
+        source_lines_used = {n for n, _ in evidence + basis}
+        ids = item.get("fact_ids")
+        facts_used = [i for i in range(1, len(facts) + 1)
+                      if isinstance(ids, list) and any(type(k) is int and k == i for k in ids)
+                      and any(n in source_lines_used for n, _ in facts[i - 1]["evidence"])]
+        first = report_excerpt(lines, evidence, report_sources or {}, set())
+        out.append("**报告记载**　" + first.removeprefix("报告原文："))
+        out.append("**审理判断**　" + judgment.rstrip("。") + "。（" + places(evidence) + "）")
+        if basis and reasoning and reasoning != judgment:
+            out.append("**审理分析**　" + reasoning.rstrip("。") + "。（" + places(basis) + "）")
+        by_law = {}
+        for i in facts_used:
+            for rid, kind, reason in matches.get(i, []):
+                if rid in verified and (i, rid) not in by_law:
+                    by_law[i, rid] = (kind, reason)
+        ids = item.get("ref_ids")
+        original_quotes = cited(lines, item.get("citation_evidence"))
+        original_ids = set()
+        bindings = []
+        for index, ref in enumerate(refs, 1):
+            if not isinstance(ids, list) or not any(type(k) is int and k == index for k in ids):
+                continue
+            n, name, num, year = ref
+            related = any(verified[rid]["title"] == name and verified[rid]["num"] == num
+                          and (not year or year in verified[rid]["version"]) for _, rid in by_law)
+            ref_quoted = any(line == n and any(number(m[1]) == num for m in ARTICLE.finditer(q))
+                             for line, q in original_quotes)
+            if n in source_lines_used or related or ref_quoted:
+                notes, included = original_notes(ref, repeated=ref in assigned)
+                bindings.extend(notes)
+                original_ids.update(included)
+                assigned.add(ref)
+        for (i, rid), (kind, reason) in by_law.items():
+            if rid in original_ids:
+                continue
+            law = verified[rid]
+            status = {"原引不符": "引用不符", "衔接比较": "版本衔接待核"}.get(kind, "补充比对（待核）")
+            bindings.append(f"- **{status}** · {link(law)}。{safe(reason)}"
+                            + legal_excerpt(law, law_excerpts.get(("fact", i, rid))))
+            original_ids.add(rid)
+        out.append("**本项法规依据**" + ("\n\n" + "\n\n".join(bindings) if bindings else
+                   "　本项尚无已核条款与上述证据直接对应，以上为材料核查意见。"))
+
+    # An original citation without an established issue association is still audited
+    # beside its own report passage. Do not assign it to the nearest issue or page.
+    remaining = {}
+    for ref in refs:
+        if ref not in assigned:
+            remaining.setdefault(ref[0], []).append(ref)
+    for n, group in remaining.items():
+        excerpt = report_excerpt(lines, [(n, lines[n][1])], report_sources or {}, set())
+        out.append("### 原引核查 · " + place(n))
+        out.append("**报告记载**　" + excerpt.removeprefix("报告原文："))
+        out.append("**审理判断及依据**　该段原引尚待对应到具体事项。")
+        for ref in group:
+            notes, _ = original_notes(ref)
+            out.extend(notes)
+    if not sections and not remaining:
+        out.append("现有核验结果不足以作出分项结论。")
     out += [
         "",
         "## 办理建议",
@@ -1104,6 +1147,7 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
                         evidence_lines.update(
                             n for n, _ in cited(lines, item.get("evidence"))
                         )
+                    evidence_lines.update(n for n, *_ in refs)
                     if evidence_lines:
                         brief = ask(
                             client,
@@ -1113,8 +1157,14 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
                             '区分交付、实际控制、退款、资金性质及程序补正，以本案材料为限，保留当事人解释和未查清事实；不要将账面金额直接认定为违纪所得。'
                             '每项判断及分析分别附可定位的输入行和连续原句。actions至多三项，说明向谁补取什么、用于解决哪个判断；不要重复结论。'
                             '不写条号、链接或确定处分。输出JSON，overview、conclusions、actions均为数组。每项形如{"text":"意见","evidence":[{"line":整数,"quote":"连续原句"}]}。'
-                            'conclusions每项额外包含"analysis":{"text":"二至三句具体推理","evidence":[{"line":整数,"quote":"直接支持分析的连续原句"}]}。总览优先引用报告的拟处理意见。',
-                            [[n, lines[n][1]] for n in sorted(evidence_lines)],
+                            'conclusions每项额外包含"analysis":{"text":"二至三句具体推理","evidence":[{"line":整数,"quote":"直接支持分析的连续原句"}]}。总览优先引用报告的拟处理意见。'
+                            + '每个争点另给title（简短案情标题）、fact_ids（同一行为编号数组）、ref_ids（报告就此争点使用的原引编号数组）。'
+                            '以原文中记载发生了什么作为首条evidence，标明主体、时间和金额。引用编号须逐项对应；程序依据不能用于实体定性。'
+                            '每项另给citation_evidence数组，格式同evidence，只用于摘录原报告引用条号的连续原话（包含条号），与证据分析分开。若同一争点出现先误引再纠正，两条均纳入该争点，注明报告已纠正。每条原引优先归到最直接的一个争点；不能对应留空。只允许选输入提供的编号。',
+                            {"报告行": [[n, lines[n][1]] for n in sorted(evidence_lines)],
+                             "行为": [[i, f["label"], [n for n, _ in f["evidence"]]]
+                                    for i, f in enumerate(facts, 1)],
+                             "原引": [[i, *ref] for i, ref in enumerate(dict.fromkeys(refs), 1)]},
                         )
                 except Exception as exc:
                     logger.warning(

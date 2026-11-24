@@ -168,8 +168,7 @@ def test_brief_keeps_citation_uncertainty_and_rejects_ungrounded_summary():
     )
     assert [s for s in output.splitlines() if s.startswith("## ")] == [
         "## 总览",
-        "## 审理结论",
-        "## 引用核查",
+        "## 分项审理意见",
         "## 办理建议",
     ]
     assert "版本待核" in output and "**适用待核**" in output
@@ -211,7 +210,7 @@ def test_brief_retains_verified_alternatives_and_separately_grounded_analysis():
     evidence = [{"line": 1, "quote": "本人已经签收"}]
     basis = [{"line": 2, "quote": "仅有前台姓名"}]
     brief = {"conclusions": [
-        {"text": "签收主体待核", "evidence": evidence,
+        {"title": "签收", "fact_ids": [1], "ref_ids": [1], "text": "签收主体待核", "evidence": evidence,
          "analysis": {"text": "前台代签不能证明本人控制", "evidence": basis}},
         {"text": "移送意见须比对原件", "evidence": evidence,
          "analysis": {"text": "未经证实的扩写", "evidence": [{"line": 2, "quote": "已由本人签字"}]}},
@@ -225,7 +224,7 @@ def test_brief_retains_verified_alternatives_and_separately_grounded_analysis():
                 ("fact", 1, "other"): "签收情况应予核查"}
     output = render_brief(rows, brief, verified, laws, [(1, "某规定", 2, "")], {}, {}, {}, [],
                           {1: [("other", "候选待核", "须核对交付对象"), ("unverified", "候选待核", "无原件")]},
-                          law_excerpts=excerpts)
+                          law_excerpts=excerpts, facts=[{"evidence": [(2, "仅有前台姓名")]}])
     assert "s3://source/original.txt" in output and "s3://source/other.txt" in output
     assert "s3://source/unverified.txt" not in output
     assert "条文原文：“签收情况应予核查”" in output and "与原件不同的摘录" not in output
@@ -249,5 +248,44 @@ def test_unusable_summary_reuses_anchored_fact_analysis():
               "evidence": [(1, "仅有前台姓名")]}]
     result = render_brief(rows, summary, {}, [], [], {}, {}, {}, [], {},
                           report_sources={rows[1][1]: {("", "", 0)}}, facts=facts)
-    assert "审理分析" in result and "不能证明本人实际取得" in result
+    assert "审理判断" in result and "不能证明本人实际取得" in result
     assert "本人签收" not in result and "#submitted-report" in result
+
+def test_issue_cannot_borrow_another_issues_law_or_drop_unassigned_original():
+    from management.services.agent.case_review_workflow import render_brief
+
+    rows = {1: ("材料", "封袋由前台代收。"), 2: ("材料", "报销款由财务支付。"),
+            3: ("材料", "报告另引《某规定》第六条。")}
+    facts = [{"evidence": [(1, rows[1][1])]}, {"evidence": [(2, rows[2][1])]}]
+    laws = [dict(id=str(n), title="某规定", num=n, version="某年版", body="有关事项应予查明。",
+                 url=f"s3://source/{n}.txt") for n in (2, 3, 6)]
+    summary = {"conclusions": [
+        {"title": "封袋交付", "text": "个人取得待核", "fact_ids": [1, 2], "ref_ids": [1],
+         "evidence": [{"line": 1, "quote": rows[1][1]}]},
+        {"title": "财务付款", "text": "款项性质待核", "fact_ids": [2], "ref_ids": [],
+         "evidence": [{"line": 2, "quote": rows[2][1]}]}]}
+    result = render_brief(rows, summary, {r["id"]: r for r in laws}, laws,
+                          [(3, "某规定", 6, "")], {}, {}, {}, [],
+                          {1: [("2", "候选待核", "核对接收人")], 2: [("3", "候选待核", "核对收款人")]},
+                          facts=facts)
+    first, second = result.split("### 2. 财务付款")
+    second, unassigned = second.split("### 原引核查")
+    assert "封袋由前台代收" in first and "source/2.txt" in first and "source/3.txt" not in first
+    assert "source/3.txt" in second and "source/2.txt" not in second
+    assert "source/6.txt" in unassigned and "source/6.txt" not in first + second
+
+
+def test_original_correction_on_separate_line_stays_with_issue():
+    from management.services.agent.case_review_workflow import render_brief
+    passage = "移送部门原引《某规定》第六条，审理稿已纠正。"
+    rows = {1: ("报告", "前台代签封袋。"), 2: ("报告", passage)}
+    item = {"title": "封袋交接", "text": "个人取得待核", "ref_ids": [1],
+            "evidence": [{"line": 1, "quote": rows[1][1]}],
+            "citation_evidence": [{"line": 2, "quote": passage}]}
+    law = dict(id="L", title="某规定", version="某年版", num=6, body="第六条 原文。", url="s3://laws/6.txt")
+    args = (rows, {"conclusions": [item]}, {"L": law}, [law], [(2, "某规定", 6, "")],
+            {}, {(2, "L"): "引用不符"}, {}, [], {})
+    output = render_brief(*args)
+    assert "### 原引核查" not in output and "引用不符" in output and "s3://laws/6.txt" in output
+    item["citation_evidence"] = [{"line": 2, "quote": "审理稿已纠正"}]
+    assert "### 原引核查" in render_brief(*args)
