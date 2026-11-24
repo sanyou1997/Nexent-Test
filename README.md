@@ -37,7 +37,7 @@ python -X utf8 restore.py start
    python -X utf8 restore.py agent --account $account
    ```
 
-5. 在“MCP 仓库”添加 SSE 服务，名称填 **review_rules**，地址填 `http://review-rules:8096/sse`，刷新后应看见 `get_rule` 和 `review_report`。在“智能体配置”导入 `.local/agent.json`。确认模型、知识库和两项 MCP 工具均选中，再发布“纪委案件审理辅助”。首次导入使用原始智能体名称。
+5. 在“MCP 仓库”添加 SSE 服务，名称填 **review_rules**，地址填 `http://review-rules:8096/sse`，刷新后应看见 `get_rule` 和 `review_report`。在“智能体配置”导入 `.local/agent.json`。确认模型、知识库和两项 MCP 工具均选中，在目标租户将分类标签设为 **纪检监察**，再发布“纪委案件审理辅助”。首次导入使用原始智能体名称。
 6. 绑定已发布版本并启用该智能体的文件解析。到图形界面的“文件解析”核对本机服务地址并测试连接。
 
    ```powershell
