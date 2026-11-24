@@ -202,3 +202,52 @@ def test_brief_pasted_report_and_nonmatching_page():
     assert "#submitted-report" in report_excerpt({1: ("提交文本", row)}, evidence, {row: {("", "", 0)}}, set())
     actual = {row: {("attachments/user/report.pdf", "报告.pdf", 1)}}
     assert "#report-source" not in report_excerpt({1: ("报告.pdf · PDF 第2页", row)}, evidence, actual, set())
+
+
+def test_brief_retains_verified_alternatives_and_separately_grounded_analysis():
+    from management.services.agent.case_review_workflow import render_brief
+
+    rows = {1: ("报告", "移送意见称本人已经签收。"), 2: ("报告", "签收单仅有前台姓名。")}
+    evidence = [{"line": 1, "quote": "本人已经签收"}]
+    basis = [{"line": 2, "quote": "仅有前台姓名"}]
+    brief = {"conclusions": [
+        {"text": "签收主体待核", "evidence": evidence,
+         "analysis": {"text": "前台代签不能证明本人控制", "evidence": basis}},
+        {"text": "移送意见须比对原件", "evidence": evidence,
+         "analysis": {"text": "未经证实的扩写", "evidence": [{"line": 2, "quote": "已由本人签字"}]}},
+    ]}
+    laws = [dict(id=name, title="某规定", num=n, version="某年版", body=body,
+                 url=f"s3://source/{name}.txt") for name, n, body in (
+        ("original", 2, "第二条 交付事实需要审查。"), ("other", 3, "第三条 签收情况应予核查。"),
+        ("unverified", 4, "第四条 未经核实的条文。"))]
+    verified = {law["id"]: law for law in laws[:2]}
+    excerpts = {("original", 1, "original"): "与原件不同的摘录",
+                ("fact", 1, "other"): "签收情况应予核查"}
+    output = render_brief(rows, brief, verified, laws, [(1, "某规定", 2, "")], {}, {}, {}, [],
+                          {1: [("other", "候选待核", "须核对交付对象"), ("unverified", "候选待核", "无原件")]},
+                          law_excerpts=excerpts)
+    assert "s3://source/original.txt" in output and "s3://source/other.txt" in output
+    assert "s3://source/unverified.txt" not in output
+    assert "条文原文：“签收情况应予核查”" in output and "与原件不同的摘录" not in output
+    assert "前台代签不能证明本人控制" in output and "未经证实的扩写" not in output
+
+
+def test_brief_explains_missing_library_without_linking_unverified_law():
+    from management.services.agent.case_review_workflow import render_brief
+
+    result = render_brief({1: ("报告", "引用《某规定》第二条")}, {}, {}, [], [(1, "某规定", 2, "")],
+                          {}, {}, {}, [], {})
+    assert "本轮未读取到可核验的法规原件" in result and "跟随智能体默认" in result
+    assert "原件未核实" in result and "s3://" not in result
+
+
+def test_unusable_summary_reuses_anchored_fact_analysis():
+    from management.services.agent.case_review_workflow import render_brief
+    rows = {1: ("提交文本", "签收单仅有前台姓名。")}
+    summary = {"conclusions": [{"text": "本人签收", "evidence": [{"line": 1, "quote": "本人已签收"}]}]}
+    facts = [{"label": "前台代收", "issue": "不能证明本人实际取得",
+              "evidence": [(1, "仅有前台姓名")]}]
+    result = render_brief(rows, summary, {}, [], [], {}, {}, {}, [], {},
+                          report_sources={rows[1][1]: {("", "", 0)}}, facts=facts)
+    assert "审理分析" in result and "不能证明本人实际取得" in result
+    assert "本人签收" not in result and "#submitted-report" in result

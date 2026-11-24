@@ -45,3 +45,11 @@ class DocumentParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("原 PDF 共 3 页", result)
         self.assertIn("第 2 页：未提取到文字", result)
         self.assertIn("PDF 第 3 页】\n金额 8,000", result)
+
+
+    def test_duplicate_report_uses_current_upload_only_when_bytes_match(self):
+        files = [{"name": "case.pdf", "object_name": key} for key in ("current", "older", "revision")]
+        with patch.object(mineru, "validate_s3_url_access"), patch.object(
+            mineru, "read_pdf", side_effect=[b"same", b"same", b"different"]
+        ):
+            self.assertEqual(mineru.distinct_report_files(files, "tenant", "user"), [files[0], files[2]])

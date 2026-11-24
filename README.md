@@ -63,6 +63,8 @@ docker compose -p nexent-models -f restore/local-services.yaml up -d --pull neve
 
 旧环境示例中的 MinerU、Paraformer ASR 使用宿主机端口 18001、18095。目标电脑需部署相应服务，或在“文件解析”中选用可访问的内网提供方。使用其他地址时，在目标部署中同步配置相应服务允许访问的来源。项目提供 Qwen ASR 适配和服务源码，另附 [Qwen ASR 部署说明](offline/Qwen3-ASR本地部署.md) 和 [Umi-OCR 部署说明](offline/Umi-OCR本地部署.md)。使用本次配套 ZIP 可一次转移这些本地服务的镜像与权重，校验文件在 `offline/`。
 
+审理时，对话输入框应显示“纪检审理本地法规库”。如果“引用核查”提示未读取到法规原件，可在当前对话的“知识库”中选择该库或跟随智能体默认，再重新审理。报告摘录来自上传的附件，可以独立预览。
+
 ## 已安装电脑更新
 
 在本项目根目录运行：

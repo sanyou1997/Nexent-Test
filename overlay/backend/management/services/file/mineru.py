@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+from collections import Counter
 from contextlib import closing
 from io import BytesIO
 from typing import Literal
@@ -175,6 +176,28 @@ async def process_attachment(tenant, user, agent_id, object_name, config, single
 
 def is_pdf(file):
     return str(file.get("name", "")).lower().endswith(".pdf") or file.get("type") == "application/pdf"
+
+
+def distinct_report_files(files, tenant, user):
+    """Keep the current attachment when the same named PDF was uploaded again."""
+    repeated = Counter(f.get("name") for f in files if is_pdf(f))
+    seen = set()
+    distinct = []
+    for f in files:
+        name = f.get("name")
+        if is_pdf(f) and repeated[name] > 1:
+            key = f.get("object_name") or urlsplit(f.get("url", "")).path.lstrip("/")
+            try:
+                validate_s3_url_access(key, user, tenant)
+                fingerprint = (name, hashlib.sha256(read_pdf(key)).digest())
+            except Exception as exc:
+                logger.info("PDF duplicate check unavailable: %s", type(exc).__name__)
+            else:
+                if fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+        distinct.append(f)
+    return distinct
 
 
 async def attachment_context(files, tenant, user, agent_id, query, budget=16000):

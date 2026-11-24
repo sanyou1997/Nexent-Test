@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import asyncio
 import copy
 import json
 import logging
@@ -2682,16 +2683,19 @@ async def create_agent_run_info(
     )
 
     parsed = ""
+    parsed_files = effective_minio_files
     if effective_minio_files:
         from database.document_parser_db import load_settings as parser_prefs
         from management.services.file.asr import audio_context, is_audio
         from management.services.file.parser_providers import selected_config
-        from management.services.file.mineru import attachment_context, is_pdf
+        from management.services.file.mineru import attachment_context, distinct_report_files, is_pdf
+
+        parsed_files = await asyncio.to_thread(distinct_report_files, effective_minio_files, tenant_id, user_id)
 
         audio_files = [f for f in effective_minio_files if is_audio(f)]
         if audio_files and not parser_prefs(tenant_id, agent_id).get("audio_enabled"):
             audio_files = []
-        pdf_text = await attachment_context(effective_minio_files, tenant_id, user_id, agent_id, query,
+        pdf_text = await attachment_context(parsed_files, tenant_id, user_id, agent_id, query,
                                             budget=8000 if audio_files else 16000)
         audio_text = ""
         if audio_files:
@@ -2958,5 +2962,5 @@ async def create_agent_run_info(
     if (Path(__file__).resolve().parents[1] / "management/services/agent/case_review_profiles.json").is_file():
         from management.services.agent.case_review_workflow import prepare as prepare_case_review
         prepare_case_review(agent_run_info, tenant_id, user_id, agent_id, version_no, query,
-                            parsed, effective_minio_files, remote_mcp_dict)
+                            parsed, parsed_files, remote_mcp_dict)
     return agent_run_info

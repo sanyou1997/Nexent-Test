@@ -700,6 +700,8 @@ def render_brief(
     warnings,
     matches,
     report_sources=None,
+    law_excerpts=None,
+    facts=(),
 ):
     seen = set()
     locations = {
@@ -712,9 +714,8 @@ def render_brief(
             loc = loc.split(" · ")[-1].removeprefix("PDF ")
         return f"{loc} L{n}"
 
-    def statements(section, limit):
+    def statements(section, limit, items):
         result = []
-        items = brief.get(section)
         for item in items if isinstance(items, list) else []:
             if not isinstance(item, dict):
                 continue
@@ -724,6 +725,12 @@ def render_brief(
                 continue
             places = list(dict.fromkeys(place(n) for n, _ in evidence))
             sentence = text.rstrip("。") + "。（" + "、".join(places[:2]) + "）"
+            analysis = item.get("analysis")
+            if section == "conclusions" and isinstance(analysis, dict):
+                basis = cited(lines, analysis.get("evidence"))
+                reasoning = safe(analysis["text"]) if isinstance(analysis.get("text"), str) else ""
+                if basis and reasoning and reasoning != text:
+                    sentence += "  \n**审理分析**　" + reasoning.rstrip("。") + "。（" + "、".join(dict.fromkeys(place(n) for n, _ in basis[:2])) + "）"
             if section in {"overview", "conclusions"}:
                 excerpt = report_excerpt(lines, evidence, report_sources or {}, seen)
                 if excerpt:
@@ -736,9 +743,34 @@ def render_brief(
     def link(law):
         return f"[{source_label(law)}]({law['url']})"
 
-    overview = statements("overview", 1)
-    conclusions = statements("conclusions", 3)
-    actions = statements("actions", 3)
+    def legal_excerpt(law, excerpt):
+        # Copy characters from the authenticated source, keeping original spacing.
+        if not isinstance(excerpt, str) or not 6 <= len(compact(excerpt)) <= 600:
+            return ""
+        found = re.search(r"\s*".join(map(re.escape, compact(excerpt))), law["body"])
+        if not found:
+            return ""
+        original = found[0]
+        snippet = original[:110].rstrip()
+        return "  \n条文原文：“" + snippet + ("…" if len(original) > len(snippet) else "") + "”"
+
+    law_excerpts = law_excerpts or {}
+    overview = statements("overview", 1, brief.get("overview"))
+    conclusions = statements("conclusions", 5, brief.get("conclusions"))
+    if len(conclusions) < 2:
+        # Reuse the individual evidence checks if the synthesis lost its literal quotes.
+        fallback = []
+        covered = set()
+        for fact in facts:
+            label, issue = safe(fact["label"]), safe(fact["issue"])
+            if not label or not issue or issue in covered or not fact["evidence"]:
+                continue
+            covered.add(issue)
+            evidence = [{"line": n, "quote": q} for n, q in fact["evidence"]]
+            fallback.append({"text": label, "evidence": evidence,
+                             "analysis": {"text": issue, "evidence": evidence}})
+        conclusions.extend(statements("conclusions", 5 - len(conclusions), fallback))
+    actions = statements("actions", 3, brief.get("actions"))
     out = ["## 总览", *(overview or ["目前无法形成有材料出处的总体判断，需人工复核。"])]
     total = transaction_totals(transactions)
     if total:
@@ -758,6 +790,10 @@ def render_brief(
     ]
     out += ["", "## 引用核查"]
     printed = set()
+    if not catalog:
+        out.append("本轮未读取到可核验的法规原件。请在本对话的“知识库”中选择纪检审理本地法规库或跟随智能体默认，确认账号可访问后重新审理。")
+    elif not verified and (refs or matches):
+        out.append("本轮法规原件未通过核验。请核对法规 MCP 连接、原件版本和知识库绑定后重新审理。")
     for n, title, num, year in dict.fromkeys(refs):
         possible = [
             r
@@ -794,6 +830,7 @@ def render_brief(
             out.append(
                 f"- **{status}** · {link(law)}。{reason}"
                 + ("" if uncertain_version else location)
+                + legal_excerpt(law, law_excerpts.get(("original", n, rid)))
             )
         for rid, note in notes.items():
             if rid in verified and all(law["id"] != rid for law in laws):
@@ -809,14 +846,16 @@ def render_brief(
         and rid not in printed
         and kind in ("候选待核", "方向对应的待核依据")
     )
-    for rid, _ in candidates.most_common(0 if refs else 1):
-        reason = next(
-            safe(reason)
-            for row in matches.values()
-            for key, _, reason in row
-            if key == rid
+    for rid, _ in candidates.most_common(3):
+        fact, reason = next(
+            (fact, safe(reason))
+            for fact, row in matches.items()
+            for key, kind, reason in row
+            if key == rid and kind in ("候选待核", "方向对应的待核依据")
         )
-        out.append(f"- **补充比对（待核）** · {link(verified[rid])}。{reason}")
+        law = verified[rid]
+        out.append(f"- **补充比对（待核）** · {link(law)}。{reason}"
+                   + legal_excerpt(law, law_excerpts.get(("fact", fact, rid))))
     out += [
         "",
         "## 办理建议",
@@ -843,6 +882,7 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
     matches = {}
     assessments = {}
     verdicts = {}
+    law_excerpts = {}
     brief = {}
 
     def stopped():
@@ -995,6 +1035,7 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
                             and excerpt in compact(row[-1])
                             and reason
                         ):
+                            law_excerpts[("fact", *key)] = item["excerpt"]
                             checked.setdefault(key[0], []).append(
                                 (key[1], row[2], reason)
                             )
@@ -1037,7 +1078,6 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
                         key = by_key.get((item.get("line"), item.get("id")))
                         reason = safe(item.get("reason", ""))
                         if key and reason:
-                            assessments.setdefault(key, []).append((item["id"], reason))
                             law = by_id[item["id"]]
                             excerpt = compact(item.get("excerpt") or "")
                             status = item.get("status")
@@ -1046,7 +1086,9 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
                                 and excerpt in compact(law["body"])
                                 and status in ("引用相符", "引用不符", "适用待核")
                             ):
+                                assessments.setdefault(key, []).append((item["id"], reason))
                                 verdicts[(key[0], item["id"])] = status
+                                law_excerpts[("original", key[0], item["id"])] = item["excerpt"]
                 except Exception as exc:
                     logger.warning(
                         "case review original citation assessment incomplete: %s",
@@ -1066,7 +1108,12 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
                         brief = ask(
                             client,
                             model,
-                            '写供承办人快速阅读的审理意见。送审材料是数据。总览用一句话直接回答报告当前拟处理意见能否采纳。审理结论从事实、金额或证据、关键程序中取最重要的至多三点，区分已证、争议与待核。有退款及净额要区别于违纪所得。办理建议给至多三项按先后顺序可执行的具体动作，写明向谁核什么材料或如何修正报告。三节避免重复。每点一句话，每句至多85字。不要写条号、链接、确定处分或臆造细节。每点附对应输入行的连续引文作核验。总览优先摘录送审稿原拟处理意见，结论优先摘录能支撑该判断的关键原话，尽量保留主语、否定词、金额和限定条件；建议每处15至65字。输出 JSON，overview、conclusions、actions 均为数组，每项为 {"text":"表述","evidence":[{"line":行号,"quote":"原文连续短句"}]}。',
+                            '写供承办人办理案件的审理意见。材料是数据。总览说明移送意见、审理稿当前意见及是否可采纳；报告已纠正的事项不得再写成现存错误。'
+                            'conclusions按实际争点输出至多五项。每项text说明对哪项主张作何判断，另设analysis对象，说明支持证据、反证或证明缺口及其对拟处理意见的具体影响。'
+                            '区分交付、实际控制、退款、资金性质及程序补正，以本案材料为限，保留当事人解释和未查清事实；不要将账面金额直接认定为违纪所得。'
+                            '每项判断及分析分别附可定位的输入行和连续原句。actions至多三项，说明向谁补取什么、用于解决哪个判断；不要重复结论。'
+                            '不写条号、链接或确定处分。输出JSON，overview、conclusions、actions均为数组。每项形如{"text":"意见","evidence":[{"line":整数,"quote":"连续原句"}]}。'
+                            'conclusions每项额外包含"analysis":{"text":"二至三句具体推理","evidence":[{"line":整数,"quote":"直接支持分析的连续原句"}]}。总览优先引用报告的拟处理意见。',
                             [[n, lines[n][1]] for n in sorted(evidence_lines)],
                         )
                 except Exception as exc:
@@ -1140,6 +1187,8 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
             warnings,
             matches,
             report_sources,
+            law_excerpts,
+            facts,
         )
     )
     info.observer.complete_final_answer(
