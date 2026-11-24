@@ -17,6 +17,7 @@ import {
 import { useAuiState } from "@assistant-ui/react";
 import { type FC, memo, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Modal } from "antd";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import remarkGfm from "remark-gfm";
 import { defaultUrlTransform, type UrlTransform } from "react-markdown";
@@ -396,11 +397,33 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
   return <AuthenticatedImage src={imageSrc} alt={alt} {...props} />;
 };
 
+function SubmittedReportLink({ children, className }: React.ComponentProps<"a">) {
+  const [open, setOpen] = useState(false);
+  const { t } = useTranslation("common");
+  const excerpt = typeof children === "string" ? children : Array.isArray(children) ? children.join("") : "";
+  const original = useAuiState(s => {
+    const messages = s.thread.messages;
+    const index = messages.findIndex(m => m.id === s.message.id);
+    const input = messages.slice(0, index < 0 ? 0 : index).reverse().find(m => m.role === "user");
+    return input?.content.filter(p => p.type === "text").map(p => p.text).join("\n") || "";
+  });
+  const pos = excerpt ? original.indexOf(excerpt) : -1;
+  if (pos < 0 || original.indexOf(excerpt, pos + 1) >= 0) return <>{children}</>;
+  return <><a href="#submitted-report" className={className} onClick={e => { e.preventDefault(); setOpen(true); }}>{children}</a>
+    <Modal title={t("review.submittedReport")} open={open} footer={null} onCancel={() => setOpen(false)}
+      afterOpenChange={visible => { if (visible) document.getElementById("submitted-report-mark")?.scrollIntoView({block: "center"}); }}>
+      <div className="max-h-[65vh] overflow-y-auto whitespace-pre-wrap leading-7">
+        {original.slice(0,pos)}<mark id="submitted-report-mark">{excerpt}</mark>{original.slice(pos + excerpt.length)}
+      </div>
+    </Modal></>;
+}
+
 const PermanentFileLink: FC<React.ComponentProps<"a">> = ({
   href,
   className,
   ...props
 }) => {
+  if (href === "#submitted-report") return <SubmittedReportLink className={cn("text-primary underline", className)} {...props} />;
   return (
     <LawSourceLink
       href={href}

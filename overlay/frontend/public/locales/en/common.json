@@ -1,4 +1,5 @@
 {
+  "review.submittedReport": "Submitted report",
   "lawSource.open": "View legal source",
   "lawSource.unavailable": "Cannot open the source. Check your account and file access.",
   "lawSource.retry": "Retry",

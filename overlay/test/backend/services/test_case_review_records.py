@@ -175,3 +175,30 @@ def test_brief_keeps_citation_uncertainty_and_rejects_ungrounded_summary():
     assert "版本待核" in output and "**适用待核**" in output
     assert "授权原件中未查到" in output and "第200条" in output
     assert "已有完整证据链" not in output and "s3://local/0.txt" not in output
+
+
+def test_brief_excerpt_uses_original_spacing_and_the_authorized_page():
+    from urllib.parse import parse_qs
+    from management.services.agent.case_review_workflow import report_excerpt
+    row = "项目组建议先作处理，退款 5,400 元仍待核对。"
+    lines = {3: ("结算.pdf · PDF 第5页", row)}
+    target = ("attachments/owner/report.pdf", "结算.pdf", 5)
+    sources = {row: {target, (target[0], target[1], 2)}}
+    seen = set()
+    excerpt = report_excerpt(lines, [(3, "退款5,400元仍待核对")], sources, seen)
+    assert "[退款 5,400 元仍待核对]" in excerpt
+    query = excerpt.split("#report-source?", 1)[1].split(")", 1)[0]
+    assert parse_qs(query) == {"object":[target[0]], "name":["结算.pdf"], "page":["5"]}
+    assert report_excerpt(lines, [(3, "退款5,400元仍待核对")], sources, seen) == ""
+    assert not report_excerpt(lines, [(3, "报告确认退款全部属实")], sources, set())
+    sources[row].add(("attachments/other/second.pdf", "结算.pdf", 5))
+    assert "#report-source" not in report_excerpt(lines, [(3, row)], sources, set())
+
+
+def test_brief_pasted_report_and_nonmatching_page():
+    from management.services.agent.case_review_workflow import report_excerpt
+    row = "事实尚待核实。"
+    evidence = [(1, row)]
+    assert "#submitted-report" in report_excerpt({1: ("提交文本", row)}, evidence, {row: {("", "", 0)}}, set())
+    actual = {row: {("attachments/user/report.pdf", "报告.pdf", 1)}}
+    assert "#report-source" not in report_excerpt({1: ("报告.pdf · PDF 第2页", row)}, evidence, actual, set())

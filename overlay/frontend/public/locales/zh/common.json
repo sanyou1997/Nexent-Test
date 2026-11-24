@@ -1,4 +1,5 @@
 {
+  "review.submittedReport": "提交的报告原文",
   "lawSource.open": "查看法规原文",
   "lawSource.unavailable": "未能读取原件。请检查登录账号和文件访问权限。",
   "lawSource.retry": "重新加载",
