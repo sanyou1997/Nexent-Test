@@ -1,0 +1,9 @@
+.local/
+__pycache__/
+*.pyc
+*.sql.gz
+*.dump
+*.tar
+.env
+*.key
+*.pem

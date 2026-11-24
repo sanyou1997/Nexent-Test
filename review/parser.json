@@ -1,0 +1,15 @@
+{
+  "tenant": {
+    "asr": {
+      "url": "http://host.docker.internal:18095"
+    },
+    "url": "http://host.docker.internal:18001",
+    "mode": "auto",
+    "tables": true,
+    "language": "ch"
+  },
+  "agent": {
+    "enabled": true,
+    "audio_enabled": true
+  }
+}

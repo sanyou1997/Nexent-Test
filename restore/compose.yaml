@@ -1,0 +1,21 @@
+services:
+  nexent-runtime:
+    image: nexent-test/backend:2.8.5
+  nexent-config:
+    image: nexent-test/backend:2.8.5
+  nexent-northbound:
+    image: nexent-test/backend:2.8.5
+  nexent-web:
+    image: nexent-test/web:2.8.5
+  review-rules:
+    image: nexent-test/backend:2.8.5
+    entrypoint: ["/opt/backend/.venv/bin/python", "/review/review_mcp.py"]
+    restart: unless-stopped
+    working_dir: /review
+    volumes:
+      - type: bind
+        source: ${REVIEW_SNAPSHOT_ROOT:?run restore.py start}
+        target: /review
+        read_only: true
+    networks:
+      - nexent
