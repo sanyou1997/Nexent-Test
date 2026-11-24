@@ -289,3 +289,29 @@ def test_original_correction_on_separate_line_stays_with_issue():
     assert "### 原引核查" not in output and "引用不符" in output and "s3://laws/6.txt" in output
     item["citation_evidence"] = [{"line": 2, "quote": "审理稿已纠正"}]
     assert "### 原引核查" in render_brief(*args)
+
+
+def test_review_plan_events_track_work_and_do_not_complete_cancelled_steps(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import pytest
+    from management.services.agent import case_review_workflow as workflow
+    from nexent.core.concurrency.cancellation import RunTerminated
+
+    obs = Mock()
+    info = SimpleNamespace(observer=obs, agent_config=SimpleNamespace(display_name="审理"))
+    def stop_after_facts(info, source, user, connection, instructions, detailed, sources, advance):
+        advance("facts")
+        raise RunTerminated()
+    monkeypatch.setattr(workflow, "_review", stop_after_facts)
+    with pytest.raises(RunTerminated):
+        workflow.deliver(info, source="", user="u", connection={}, instructions="")
+    events = [json.loads(call.args[2]) for call in obs.add_message.call_args_list]
+    assert len({event["plan_id"] for event in events}) == 1
+    states = [[s["status"] for s in event["steps"]] for event in events]
+    assert states == [["in_progress"] + ["pending"] * 5,
+                      ["completed", "in_progress"] + ["pending"] * 4,
+                      ["completed"] + ["skipped"] * 5]
+    assert events[1]["steps"][1]["description"] == "进行中"
+    obs.complete_final_answer.assert_not_called()

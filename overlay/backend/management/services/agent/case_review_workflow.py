@@ -13,6 +13,7 @@ from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
+from uuid import uuid4
 from zipfile import ZipFile
 from xml.etree import ElementTree
 
@@ -20,6 +21,7 @@ import httpx
 import jieba
 from mcp import ClientSession
 from mcp.client.sse import sse_client
+from nexent.core.utils.observer import ProcessType
 from openai import OpenAI
 from json_repair import repair_json
 from sqlalchemy import select
@@ -872,14 +874,42 @@ def render_brief(
                 bindings.extend(notes)
                 original_ids.update(included)
                 assigned.add(ref)
+        shown = set()
         for (i, rid), (kind, reason) in by_law.items():
-            if rid in original_ids:
+            if rid in shown:
                 continue
+            shown.add(rid)
             law = verified[rid]
+            if rid in original_ids:
+                bindings.append(f"本项要件比对 · {link(law)}。{safe(reason)}")
+                continue
             status = {"原引不符": "引用不符", "衔接比较": "版本衔接待核"}.get(kind, "补充比对（待核）")
-            bindings.append(f"- **{status}** · {link(law)}。{safe(reason)}"
+            timing = ""
+            when = facts[i - 1].get("when")
+            if when and law.get("effective"):
+                period = period_status(law, when, catalog)
+                if "落在库存版本期间" not in period:
+                    timing = f"{when}，{period}。"
+                    status = "版本适用待核"
+            bindings.append(f"- **{status}** · {link(law)}。{timing}{safe(reason)}"
                             + legal_excerpt(law, law_excerpts.get(("fact", i, rid))))
-            original_ids.add(rid)
+        # Cross-reference the report's original paragraph when it cites the very
+        # same provision. Other articles in that paragraph are explicitly audited
+        # as original citations, never promoted to a basis for this finding.
+        cited_passages = {n for n, name, num, year in refs
+                          if any(law["title"] == name and law["num"] == num
+                                 and (not year or year in law["version"])
+                                 for law in (verified[rid] for rid in shown))}
+        for n in sorted(cited_passages):
+            pending = [ref for ref in refs if ref[0] == n and ref not in assigned]
+            if not pending:
+                continue
+            passage = report_excerpt(lines, [(n, lines[n][1])], report_sources or {}, set())
+            bindings.append("**报告同条原引核查**　" + passage.removeprefix("报告原文："))
+            for ref in pending:
+                notes, _ = original_notes(ref)
+                bindings.extend(notes)
+                assigned.add(ref)
         out.append("**本项法规依据**" + ("\n\n" + "\n\n".join(bindings) if bindings else
                    "　本项尚无已核条款与上述证据直接对应，以上为材料核查意见。"))
 
@@ -915,6 +945,47 @@ def render_brief(
 
 
 def deliver(info, *, source, user, connection, instructions, detailed=False, report_sources=None):
+    steps = [("source", "整理报告原文与法规目录"), ("facts", "核对行为、时间和证据"),
+             ("laws", "比对法规要件与报告原引")]
+    if not detailed:
+        steps.append(("issues", "汇总争点与证据缺口"))
+    steps.extend([("verify", "核验法规原件与出处"), ("report", "编排逐项审理意见")])
+    plan_id = str(uuid4())
+    states = dict.fromkeys((key for key, _ in steps), "pending")
+    labels = {"pending": "待开始", "in_progress": "进行中", "completed": "已完成", "skipped": "未完成"}
+    current = None
+
+    def publish():
+        # The composer consumes the same plan snapshot live and on history reload.
+        payload = {"plan_id": plan_id, "title": "案件审理进度", "steps": [
+            {"id": key, "title": title, "status": states[key], "description": labels[states[key]]}
+            for key, title in steps
+        ]}
+        info.observer.add_message("", ProcessType.PLAN, json.dumps(payload, ensure_ascii=False))
+
+    def advance(step):
+        nonlocal current
+        if current is not None:
+            states[current] = "completed"
+        current = step
+        if step is not None:
+            states[step] = "in_progress"
+        publish()
+
+    try:
+        advance("source")
+        answer = _review(info, source, user, connection, instructions, detailed, report_sources, advance)
+        advance(None)
+        info.observer.complete_final_answer(info.agent_config.display_name or info.agent_config.name, answer)
+    finally:
+        if current is not None:
+            for key in states:
+                if states[key] != "completed":
+                    states[key] = "skipped"
+            publish()
+
+
+def _review(info, source, user, connection, instructions, detailed, report_sources, advance):
     lines, transactions, warnings = source_lines(source)
     catalog = load_catalog(info, user)
     refs = raw_citations(lines, catalog)
@@ -959,6 +1030,7 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
             max_retries=1,
             timeout=90,
         ) as client:
+            advance("facts")
             for batch in chunks(
                 ([n, loc, text] for n, (loc, text) in lines.items()), 4400
             ):
@@ -985,6 +1057,7 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
                         f"L{batch[0][0]} 至 L{batch[-1][0]} 的叙述性事实抽取未完成，待人工核对。"
                     )
             facts = facts_from_plan(lines, transactions, facts_plan)
+            advance("laws")
             options = candidates(facts, catalog, refs, lines, transactions)
             for batch in chunks(
                 (
@@ -1140,6 +1213,7 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
                     warnings.append("部分原引的个案适用理由须人工复核。")
             if not detailed:
                 stopped()
+                advance("issues")
                 try:
                     # Synthesize once across the case, using evidence already located in the report.
                     evidence_lines = {n for f in facts for n, _ in f["evidence"]}
@@ -1172,6 +1246,7 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
                     )
                     warnings.append("综合摘要未完成，需结合逐笔核验明细复核。")
     stopped()
+    advance("verify")
     counterparts = {}
     for n, title, num, year in refs:
         for law in catalog:
@@ -1211,7 +1286,8 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
                 row = matches.setdefault(i, [])
                 if not any(entry[0] == rid for entry in row):
                     row.append((rid, "方向对应的待核依据", note))
-    answer = (
+    advance("report")
+    return (
         render(
             lines,
             facts,
@@ -1240,7 +1316,4 @@ def deliver(info, *, source, user, connection, instructions, detailed=False, rep
             law_excerpts,
             facts,
         )
-    )
-    info.observer.complete_final_answer(
-        info.agent_config.display_name or info.agent_config.name, answer
     )
