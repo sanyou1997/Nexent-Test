@@ -134,6 +134,34 @@ def bounds(when):
     return None
 
 
+def fact_passages(batch):
+    """Stable sentence IDs retain the original page and physical line across batches."""
+    passages = {}
+    for n, _, body in batch:
+        for j, part in enumerate(re.findall(r"[^。！？；]+[。！？；]*|[。！？；]+", body), 1):
+            if part.strip():
+                passages[f"{n}.{j}"] = {"line": n, "quote": part.strip()}
+    return passages
+
+
+def expand_fact_refs(result, passages):
+    for key in ("facts", "findings"):
+        items = result.get(key, [])
+        if not isinstance(items, list):
+            raise ValueError("Expected a list of review records")
+        result[key] = [item for item in items if isinstance(item, dict)]
+        for item in result[key]:
+            ids = item.get("refs")
+            item["evidence"] = [passages[s] for s in ids if isinstance(s, str) and s in passages] if isinstance(ids, list) else []
+            timing = item.get("time")
+            if not isinstance(timing, dict):
+                item["time"] = {}
+                continue
+            source = passages.get(str(timing.get("ref", "")))
+            item["time"] = dict(source, date=timing.get("date", ""), basis=timing.get("basis", "")) if source else {}
+    return result
+
+
 def cited(rows, evidence):
     """Only accept a literal quotation at a source position in this run."""
     checked = []

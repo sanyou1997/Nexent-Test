@@ -349,8 +349,24 @@ def test_review_uses_model_thinking_switch_and_streams_only_public_activity():
     assert create.call_args.kwargs["extra_body"]["thinking"]["type"] == "enabled"
     assert create.call_args.kwargs["max_tokens"] == 32768
     assert len(notes) == 1 and "private" not in notes[0]
+    create.return_value = NS(choices=[NS(message=NS(content='{"ok": true}'), finish_reason="stop")])
+    assert ask(client, model, "extract", [], deliberate=False) == {"ok": True}
+    assert create.call_args.kwargs["extra_body"]["thinking"]["type"] == "disabled"
+    assert model.enable_thinking
     model.enable_thinking = False
     create.return_value = NS(choices=[NS(message=NS(content='{"ok": true}'), finish_reason="stop")])
     assert ask(client, model, "review", []) == {"ok": True}
     assert create.call_args.kwargs["extra_body"]["thinking"]["type"] == "disabled"
     assert create.call_args.kwargs["max_tokens"] == 32768
+
+
+def test_fact_passages_recover_exact_original_and_reject_foreign_refs():
+    from management.services.agent.case_review_records import expand_fact_refs, fact_passages
+
+    lines = {7: ("第2页", "2025年4月前台签收。陈某否认本人收到。")}
+    passages = fact_passages([(7, *lines[7])])
+    result = expand_fact_refs({"facts": [{"refs": ["7.2", "8.1"], "time": {
+        "ref": "7.2", "date": "2025年4月"}}]}, passages)
+    fact, = facts_from_plan(lines, {}, result)
+    assert fact["evidence"] == [(7, "陈某否认本人收到。")]
+    assert fact["when"] == ""
