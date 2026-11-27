@@ -39,7 +39,7 @@ python -X utf8 restore.py start
    python -X utf8 restore.py agent --account $account --agent-export "D:/迁移/纪委案件审理辅助.json"
    ```
 
-4. 在“MCP 仓库”添加 SSE 服务，名称填 **review_rules**，地址填 `http://review-rules:8096/sse`，刷新后应看见 `get_rule` 和 `review_report`。在“智能体配置”导入 `.local/agent.json`。在导入向导选择新电脑的对话模型，确认知识库和两项 MCP 工具均选中，在目标租户将分类标签设为 **纪检监察**，如使用 DeepSeek 并希望启用审理思考，在该智能体所选模型的参数中开启思考，再发布“纪委案件审理辅助”。首次导入使用原始智能体名称。
+4. 在“MCP 仓库”添加 SSE 服务，名称填 **review_rules**，地址填 `http://review-rules:8096/sse`，刷新后应看见 `get_rule` 和 `review_report`。在“智能体配置”导入 `.local/agent.json`。在导入向导选择新电脑的对话模型，确认知识库和两项 MCP 工具均选中，在目标租户将分类标签设为 **纪检监察**，如使用 DeepSeek 并希望启用审理思考，在该智能体所选模型的参数中开启思考，再发布“纪委案件审理辅助”。首次导入使用原始智能体名称。用该账号在“记忆配置”的“基础设置”关闭“记忆能力”，并保持“自动 Dreaming”未开启，这两项按账号保存，关闭后审理不会带入此前对话的记忆。
 5. 绑定已发布版本，让审理流程使用本账号的法规 MCP。目标机选用官方 DeepSeek Flash 时，可按下方“已安装电脑更新”应用同一组审理参数。
 
    ```powershell

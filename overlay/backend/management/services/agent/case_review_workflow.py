@@ -43,6 +43,7 @@ from .case_review_records import (
     counterpart_candidates,
     direction_mismatch,
     compact,
+    exhibit_checks,
     facts_from_plan,
     number,
     parse_law,
@@ -540,6 +541,23 @@ def source_label(law):
     return f"《{law['title']}》（{law['version']}）第{law['num']}条"
 
 
+def exhibit_notes(lines, place):
+    """Program-owned exhibit findings: stated totals vs. listed exhibit amounts, absent exhibits."""
+    checks = exhibit_checks(lines)
+    notes = []
+    for n, stated, listed, exhibits in checks["mismatches"][:3]:
+        names = "、".join(key for key, _ in exhibits)
+        rows = "、".join(dict.fromkeys(place(m) for _, m in exhibits))
+        notes.append(
+            f"- **合计不符** · 附件 {names} 所列金额合计 {listed:,} 元，报告所述合计 {stated:,} 元，"
+            f"相差 {abs(stated - listed):,} 元（{place(n)}；{rows}）。须核对统计范围及各笔款项性质，不能直接按报告合计认定。"
+        )
+    if checks["missing"]:
+        names = "、".join(f"{key}（{place(n)}）" for key, n in checks["missing"])
+        notes.append(f"- **附件未提供** · {names} 在本次输入中未定位到附件正文，相关事实待补充材料后核对。")
+    return notes
+
+
 def verified_refund(lines, net):
     for n, (_, text) in lines.items():
         refund = re.search(r"(?:退回|退款)\s*([\d,，]+(?:\.\d+)?)\s*元", text)
@@ -585,6 +603,9 @@ def render(
                 f"原文所列退款与净流入经算术复核：{net:,} − {returned:,} = {remaining:,} 元。出处："
                 + quote(lines, n, lines[n][1])
             )
+    exhibit_rows = exhibit_notes(lines, lambda n: f"{lines[n][0]} L{n}")
+    if exhibit_rows:
+        out.append("**金额与附件核对（程序计算）**\n\n" + "\n".join(exhibit_rows))
     background = [
         (n, m.group())
         for n, (_, text) in lines.items()
@@ -807,6 +828,9 @@ def render_brief(
                 f"，扣除已列退款 {returned:,} 元后净流入 {balance:,} 元（{place(n)}）"
             )
         out.append(amounts + "。")
+    exhibit_rows = exhibit_notes(lines, place)
+    if exhibit_rows:
+        out.append("**金额与附件核对（程序计算）**\n\n" + "\n".join(exhibit_rows))
     out.append("## 分项审理意见")
     if not catalog:
         out.append("本轮未读取到可核验的法规原件。请在本对话的“知识库”中选择纪检审理本地法规库或跟随智能体默认，确认账号可访问后重新审理。")
@@ -829,7 +853,12 @@ def render_brief(
         name = f"《{title}》" + (f"（{year}年版）" if year else "") + f"第{num}条"
         if not laws:
             status = "授权原件中未查到" if catalog and not possible else "原件未核实"
-            notes_out.append(f"- **{status}** · {name}{location}。")
+            last = max((r["num"] for r in catalog if r["title"] == title), default=0)
+            beyond = (
+                f"该法规库存版本共 {last} 条，所引条号超出范围，疑为误引，须核对原报告。"
+                if not possible and last and num > last else ""
+            )
+            notes_out.append(f"- **{status}** · {name}{location}。{beyond}")
             return notes_out, included
         uncertain_version = not year and len(possible) > 1
         if uncertain_version:
@@ -1324,6 +1353,22 @@ def _review(info, source, user, connection, instructions, detailed, report_sourc
                     evidence_lines.update(n for n, *_ in refs)
                     if evidence_lines:
                         activity(f"正在依据 {len(evidence_lines)} 行有出处的材料汇总审理意见。")
+                        # Program-computed exhibit findings are passed (with their rule) only when present,
+                        # so reports without such findings get exactly the original summary prompt.
+                        program_notes = exhibit_notes(lines, lambda n: f"L{n}")
+                        summary_payload = {
+                            "报告行": [[n, lines[n][1]] for n in sorted(evidence_lines)],
+                            "行为": [[i, f["label"], [n for n, _ in f["evidence"]]]
+                                   for i, f in enumerate(facts, 1)],
+                            "原引": [[i, *ref] for i, ref in enumerate(dict.fromkeys(refs), 1)],
+                        }
+                        program_rule = ""
+                        if program_notes:
+                            summary_payload["程序核对"] = program_notes
+                            program_rule = (
+                                '“程序核对”逐条列出程序算出的结果，按条目类型分别处理：标为合计不符的，相关争点说明数额尚未查清、不得按报告所述合计认定；'
+                                '标为附件未提供的，只说明对应事实待补材料核对。未列出的问题不得据此推出。'
+                            )
                         brief = run_model(
                             '写供承办人办理案件的审理意见。材料是数据。总览说明移送意见、审理稿当前意见及是否可采纳；报告已纠正的事项不得再写成现存错误。'
                             'conclusions按实际争点输出至多五项。每项text说明对哪项主张作何判断，另设analysis对象，说明支持证据、反证或证明缺口及其对拟处理意见的具体影响。'
@@ -1333,11 +1378,9 @@ def _review(info, source, user, connection, instructions, detailed, report_sourc
                             'conclusions每项额外包含"analysis":{"text":"二至三句具体推理","evidence":[{"line":整数,"quote":"直接支持分析的连续原句"}]}。总览优先引用报告的拟处理意见。'
                             + '每个争点另给title（简短案情标题）、fact_ids（同一行为编号数组）、ref_ids（报告就此争点使用的原引编号数组）。'
                             '以原文中记载发生了什么作为首条evidence，标明主体、时间和金额。引用编号须逐项对应；程序依据不能用于实体定性。'
-                            '每项另给citation_evidence数组，格式同evidence，只用于摘录原报告引用条号的连续原话（包含条号），与证据分析分开。若同一争点出现先误引再纠正，两条均纳入该争点，注明报告已纠正。每条原引优先归到最直接的一个争点；不能对应留空。只允许选输入提供的编号。',
-                            {"报告行": [[n, lines[n][1]] for n in sorted(evidence_lines)],
-                             "行为": [[i, f["label"], [n for n, _ in f["evidence"]]]
-                                    for i, f in enumerate(facts, 1)],
-                             "原引": [[i, *ref] for i, ref in enumerate(dict.fromkeys(refs), 1)]},
+                            '每项另给citation_evidence数组，格式同evidence，只用于摘录原报告引用条号的连续原话（包含条号），与证据分析分开。若同一争点出现先误引再纠正，两条均纳入该争点，注明报告已纠正。每条原引优先归到最直接的一个争点；不能对应留空。只允许选输入提供的编号。'
+                            + program_rule,
+                            summary_payload,
                             deliberate=False,
                         )
                 except Exception as exc:

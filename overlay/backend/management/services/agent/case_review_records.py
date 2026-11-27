@@ -413,3 +413,50 @@ def transaction_totals(transactions):
         unique += vals[0]
         count += len(vals)
     return (count, raw, len(transactions), unique) if transactions else None
+
+
+EXHIBIT_HEAD = re.compile(r"^\s*附件\s*(E[-－]?\d{1,5})\s*[｜|:：]", re.I)
+EXHIBIT_REF = re.compile(r"(?<![A-Za-z0-9])E[-－]?\d{1,5}(?![A-Za-z0-9])", re.I)
+EXHIBIT_AMOUNT = re.compile(r"金额\s*[:：]\s*([0-9][0-9,，]*(?:\.\d+)?)\s*元")
+STATED_TOTAL = re.compile(r"(?:合计|共计|总计)(?:人民币)?\s*[:：]?\s*([0-9][0-9,，]*(?:\.\d+)?)\s*元")
+
+
+def _exhibit_key(text):
+    return re.sub(r"[-－]", "", text).upper()
+
+
+def _amount(text):
+    return Decimal(text.replace(",", "").replace("，", ""))
+
+
+def exhibit_checks(lines):
+    """Deterministic exhibit checks on numbered report lines.
+
+    Compares the amounts listed on attached exhibit lines ("附件 E01｜…金额：6000元")
+    with every total the report states elsewhere ("合计：18000元"), and lists exhibit
+    numbers the report mentions that have no attached exhibit line. Returns
+    {"mismatches": [(line, stated, listed, [(exhibit, line), ...])],
+     "missing": [(exhibit, first_line)]}. Missing exhibits are only reported when the
+    input attaches at least one exhibit, so a bare report summary is not flagged.
+    """
+    attached, listed, mentioned, stated = {}, [], {}, []
+    for n, (_, body) in lines.items():
+        head = EXHIBIT_HEAD.match(body)
+        if head:
+            key = _exhibit_key(head[1])
+            attached.setdefault(key, n)
+            found = EXHIBIT_AMOUNT.search(body[head.end():])
+            if found:
+                listed.append((key, n, _amount(found[1])))
+            continue
+        for ref in EXHIBIT_REF.finditer(body):
+            mentioned.setdefault(_exhibit_key(ref[0]), n)
+        for total in STATED_TOTAL.finditer(body):
+            stated.append((n, _amount(total[1])))
+    mismatches = []
+    if listed:
+        listed_sum = sum(amount for _, _, amount in listed)
+        exhibits = [(key, n) for key, n, _ in listed]
+        mismatches = [(n, value, listed_sum, exhibits) for n, value in stated if value != listed_sum]
+    missing = [(key, n) for key, n in mentioned.items() if key not in attached] if attached else []
+    return {"mismatches": mismatches, "missing": missing}
