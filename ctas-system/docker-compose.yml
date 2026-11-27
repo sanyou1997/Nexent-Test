@@ -1,0 +1,105 @@
+# 纪检监察业务辅助平台 · Docker Compose
+# 单应用单库：业务平台（FastAPI + 前端）+ 独立 PostgreSQL。
+# 与已部署的 Nexent 同机运行：加入 nexent_network（北向接口 nexent-northbound:5013、只读识别配置）
+# 与 nexent_local_ocr（Umi-OCR / Qwen3-ASR）；宿主机上的 MinerU、Paraformer 经 host.docker.internal 访问。
+# 所有默认值可在同目录 .env 中覆盖（参见 .env.docker.example）。
+name: ctas
+
+services:
+  ctas-db:
+    image: postgres:15-alpine
+    container_name: ctas-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ctas
+      POSTGRES_USER: ctas
+      POSTGRES_PASSWORD: ${CTAS_DB_PASSWORD:?请在 ctas-system/.env 中设置 CTAS_DB_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - ctas-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ctas -d ctas"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - default
+
+  ctas:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PIP_INDEX_URL: ${CTAS_PIP_INDEX_URL:-https://pypi.org/simple}
+    image: ctas-system:${CTAS_VERSION:-2.0}
+    container_name: ctas
+    restart: unless-stopped
+    depends_on:
+      ctas-db:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      SECRET_KEY: ${CTAS_SECRET_KEY:?请在 ctas-system/.env 中设置 CTAS_SECRET_KEY}
+      DATABASE_URL: postgresql+psycopg://ctas:${CTAS_DB_PASSWORD}@ctas-db:5432/ctas
+      CORS_ORIGINS: ${CTAS_CORS_ORIGINS:-http://localhost:8090,http://127.0.0.1:8090}
+      # —— Nexent：智能体会话 / 场景智能体 / 知识库（北向 API，Key 在「系统管理 → Nexent 接入」填写）——
+      NEXENT_BASE_URL: ${NEXENT_BASE_URL:-http://nexent-northbound:5013}
+      # —— 识别服务：默认跟随 Nexent 租户「文件解析」配置（只读连接，见 docker/nexent-readonly-role.sql）——
+      NEXENT_DB_DSN: ${NEXENT_DB_DSN:-}
+      CTAS_OCR_PROVIDER: ${CTAS_OCR_PROVIDER:-umi_ocr}
+      CTAS_PDF_MODE: ${CTAS_PDF_MODE:-mineru}
+      CTAS_ASR_PROVIDER: ${CTAS_ASR_PROVIDER:-paraformer}
+      CTAS_UMI_OCR_URL: ${CTAS_UMI_OCR_URL:-http://nexent-umi-ocr:1224}
+      CTAS_PADDLE_OCR_URL: ${CTAS_PADDLE_OCR_URL:-http://host.docker.internal:8080}
+      CTAS_MINERU_URL: ${CTAS_MINERU_URL:-http://host.docker.internal:18001}
+      CTAS_PARAFORMER_URL: ${CTAS_PARAFORMER_URL:-http://host.docker.internal:18095}
+      CTAS_QWEN_ASR_URL: ${CTAS_QWEN_ASR_URL:-http://nexent-qwen-asr:8000}
+      CTAS_QWEN_ASR_MODEL: ${CTAS_QWEN_ASR_MODEL:-Qwen/Qwen3-ASR-0.6B}
+    ports:
+      - "${CTAS_BIND:-127.0.0.1}:${CTAS_PORT:-8090}:8090"
+    volumes:
+      - ctas-data:/app/data            # 上传原件、档案、录音，以及 Nexent 接入 / 识别服务等设置（数据库在 PostgreSQL）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - nexent_network
+      - nexent_local_ocr
+
+  # 业务平台 MCP 服务（ctas_tools）：把案件 / 信访 / 审理查询与量纪说理、证据链、程序合规、法规引用核对、
+  # 类案检索等确定性引擎开放给 Nexent 智能体。只在容器网络内可达（不映射宿主端口），
+  # Nexent 侧按 http://ctas-mcp:8097/sse 注册，并填写 CTAS_MCP_TOKEN 作为鉴权令牌。
+  ctas-mcp:
+    image: ctas-system:${CTAS_VERSION:-2.0}
+    container_name: ctas-mcp
+    restart: unless-stopped
+    command: ["python", "-m", "app.mcp_server"]
+    entrypoint: []
+    working_dir: /app
+    depends_on:
+      ctas:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      SECRET_KEY: ${CTAS_SECRET_KEY}
+      DATABASE_URL: postgresql+psycopg://ctas:${CTAS_DB_PASSWORD}@ctas-db:5432/ctas
+      CTAS_MCP_TOKEN: ${CTAS_MCP_TOKEN:?请在 ctas-system/.env 中设置 CTAS_MCP_TOKEN}
+      CTAS_MCP_PORT: "8097"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8097/healthz',timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+      - nexent_network
+
+networks:
+  nexent_network:
+    external: true
+  nexent_local_ocr:
+    external: true
+
+volumes:
+  ctas-pgdata:
+  ctas-data:

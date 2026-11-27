@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+backend/venv/
+.venv/
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+# Runtime data / secrets / models
+backend/.env
+backend/models/
+backend/ctas.db
+backend/data/*.db
+backend/data/*.db-shm
+backend/data/*.db-wal
+backend/data/*.log
+backend/data/llm_mode.json
+backend/data/nexent_settings.json
+backend/data/archives/
+backend/app/data/
+*.zip
+
+# Docker compose secrets
+/.env
+
+# 功能检查结果（scripts/run_checks.sh 生成）
+scripts/platform_check.json

@@ -1,0 +1,34 @@
+# 核心运行依赖（源码模式启动后端）
+#
+# ⚠️【勿再删减——2026-10-14 事故根因】
+# 本文件原注释自称"跳过 OCR/ASR 等重型包"，但 app/main.py 第 212 行【无条件】注册 ocr router，
+# 而 app/routers/ocr.py 在模块【顶层】import cv2 / numpy / PIL。
+# 也就是说：cv2、numpy、PIL、rapidocr 属于【启动必需】，不是可选。
+# 此前漏写这四项，导致按本文件重建的环境必定 ImportError 起不来，
+# 继而只能手工 pip 补装，又跳过了所有版本锁定 → 装出会 segfault 的冲突组合。
+# 结论：本文件必须覆盖"启动即导入"的全部顶层依赖，否则不要用本文件建环境。
+#
+# 说明：opencv 只装 headless 版。opencv-python 与 opencv-python-headless 并存
+#       会因重复内置 libomp140.dll 触发 OpenMP 冲突 → OCR/ASR-VAD 原生崩溃(segfault)。
+#       二者在 Windows 上共用 cv2/ 目录，卸载其一会连带删掉 cv2，需 --force-reinstall 恢复。
+opencv-python-headless>=4.8
+pillow>=10.0
+numpy>=1.26
+rapidocr-onnxruntime>=1.2
+# onnxruntime 必须锁 1.20.1：1.31.0 与 opencv libomp140.dll 冲突 → import rapidocr 直接 segfault
+onnxruntime==1.20.1
+fastapi>=0.110
+uvicorn[standard]>=0.29
+sqlalchemy>=2.0
+pydantic>=2.6
+PyJWT>=2.8
+bcrypt>=4.1
+openai>=1.30
+python-dotenv>=1.0
+python-multipart>=0.0.9
+pandas>=2.0
+openpyxl>=3.1
+# PDF 解析（petitions/parse、档案原文对照）：pypdfium2 渲染 + pypdf 取文本
+# 缺失时接口返回 422「PDF 解析失败：No module named 'pypdfium2'」
+pypdfium2>=4.0
+pypdf>=4.0

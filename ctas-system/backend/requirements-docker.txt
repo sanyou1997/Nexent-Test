@@ -1,0 +1,27 @@
+# CTAS Docker 镜像依赖（Linux / Python 3.11）
+# 与 requirements.txt 的区别：去掉 pyinstaller（打包 exe 用）与 Windows 专用规避项；
+# OCR / 语音转写全部复用 Nexent 的识别服务，镜像不再安装本机 RapidOCR / faster-whisper。
+fastapi>=0.110
+uvicorn[standard]>=0.29
+sqlalchemy>=2.0
+pydantic>=2.6
+PyJWT>=2.8
+bcrypt>=4.1
+openai>=1.30
+httpx>=0.27
+python-dotenv>=1.0
+python-multipart>=0.0.9
+pillow>=10.1
+numpy>=1.26
+opencv-python-headless>=4.8
+pandas>=2.0
+openpyxl>=3.1
+pypdfium2>=4.0
+pypdf>=4.0
+python-docx>=1.1
+jieba>=0.42
+opencc-python-reimplemented>=0.1.7
+setuptools<81
+# 跟随 Nexent 识别配置：只读连接 Nexent 数据库
+psycopg[binary]>=3.1
+mcp>=1.9,<2

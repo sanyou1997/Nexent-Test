@@ -1,0 +1,16 @@
+.git
+**/__pycache__
+**/*.pyc
+frontend
+backend/venv
+backend/models
+backend/.env
+backend/ctas.db
+backend/data/*
+!backend/data/corpus
+backend/web-ctas/**/*.map
+*.zip
+*.md
+db_fix*.py
+apply_replace.py
+*.bat

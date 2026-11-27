@@ -1,0 +1,7 @@
+# 开发叠加配置：把 PostgreSQL 暴露到本机 127.0.0.1:15432，便于本地脚本 / 测试直连。
+# 用法：docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# 生产部署不要叠加本文件（数据库不对外暴露）。
+services:
+  ctas-db:
+    ports:
+      - "127.0.0.1:${CTAS_DB_DEV_PORT:-15432}:5432"

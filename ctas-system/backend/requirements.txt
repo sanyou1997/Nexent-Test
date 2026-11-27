@@ -1,0 +1,43 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+sqlalchemy>=2.0
+pydantic>=2.6
+PyJWT>=2.8
+bcrypt>=4.1
+openai>=1.30
+python-dotenv>=1.0
+python-multipart>=0.0.9
+# OCR / ASR 本地识别（CPU 推理，无需 GPU 与 API Key）
+# 注：PyPI 上 rapidocr-onnxruntime 最高 1.2.3（支持 py3.13），故下限取 1.2
+rapidocr-onnxruntime>=1.2
+faster-whisper>=1.0
+# onnxruntime 1.31.0 与 opencv 内置的 libomp140.dll 冲突导致 OCR/ASR-VAD 原生崩溃(segfault)；
+# 锁 1.20.1 稳定版，配合 main.py 顶部 KMP_DUPLICATE_LIB_OK=TRUE 规避 OpenMP 重复库冲突。
+onnxruntime==1.20.1
+# ASR 繁->简归一：纯 Python、无原生依赖的 opencc 再实现（t2s）。
+opencc-python-reimplemented>=0.1.7
+# faster-whisper 推理后端 ctranslate2：4.8.x 在 Windows+py3.13 加载模型时原生崩溃(segfault)，
+# 4.6.0 稳定可用；其 __init__ 依赖 pkg_resources，故需 setuptools<81（新 setuptools 已移除）。
+ctranslate2==4.6.0
+setuptools<81
+# 文书 Word 导出 / docx 校验（A3 导出、A5 文件校验分支）
+python-docx>=1.1
+# 离线错别字检测（nlp_typo.py：jieba 分词 + pycorrector 数据包）
+jieba>=0.42
+pycorrector>=0.4
+# PDF / 扫描件解析：实际主链路为 pypdfium2 文本抽取 + RapidOCR 扫描页补识别（纯 CPU、轻量、离线）。
+# 缺失 pypdfium2 会导致 /api/petitions/parse 返回 422「PDF 解析失败」，务必安装。
+pypdfium2>=4.0
+pypdf>=4.0
+# MinerU：可选增强（版面/公式/表格深度解析）。会连带拉取 torch（数 GB），
+# 离网信创/无算力服务器环境【不建议安装】——默认链路 pypdfium2+RapidOCR 已覆盖常规公文与扫描件。
+# 需要时再手动安装：pip install "mineru>=4.0"（模型已预置 models/mineru）
+# mineru>=4.0
+opencv-python-headless>=4.8
+pillow>=10.0
+numpy>=1.26
+# 银行流水清洗分析
+pandas>=2.0
+openpyxl>=3.1
+# 打包部署
+pyinstaller>=6.0

@@ -1,0 +1,270 @@
+/* ============================================================
+   驾驶舱 Cockpit —— 深蓝/蓝主色调 · 毛玻璃 · 细发光边框 · 低调辉光
+   低饱和霓虹（偏蓝）· 微弱粒子背景 · 科技感不花哨
+   ============================================================ */
+.cockpit {
+  position: relative;
+  min-height: calc(100vh - 56px);
+  margin: -16px;                 /* 抵消 app-content 的 16px 内边距，满幅铺底 */
+  padding: 16px 22px 28px;
+  overflow: hidden;
+  color: #dbeafe;
+  background:
+    radial-gradient(1200px 620px at 10% -12%, rgba(38, 94, 178, 0.30), transparent 60%),
+    radial-gradient(1000px 560px at 100% -4%, rgba(26, 104, 168, 0.20), transparent 55%),
+    radial-gradient(960px 720px at 58% 122%, rgba(30, 62, 142, 0.18), transparent 60%),
+    linear-gradient(180deg, #07102a 0%, #060c1e 58%, #05091a 100%);
+}
+/* 极淡科技网格 + 点阵，边缘渐隐，不抢戏（坐标网格/点阵双叠，瞬间拉高大屏氛围） */
+.cockpit::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(rgba(125, 200, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(rgba(125, 200, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 200, 255, 0.03) 1px, transparent 1px);
+  background-size: 30px 30px, 46px 46px, 46px 46px;
+  -webkit-mask: radial-gradient(circle at 50% 38%, #000 0%, transparent 84%);
+          mask: radial-gradient(circle at 50% 38%, #000 0%, transparent 84%);
+  pointer-events: none;
+  z-index: 0;
+}
+/* 微弱扫描流动线（指挥中心科技感 · 极淡慢扫 · 可关） */
+.cockpit-scan {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0;
+}
+.cockpit-scan::before {
+  content: '';
+  position: absolute; left: 0; right: 0; height: 170px; top: -170px;
+  background: linear-gradient(180deg, transparent,
+    rgba(92, 178, 240, 0.05) 40%, rgba(140, 205, 255, 0.12) 50%, rgba(92, 178, 240, 0.05) 60%, transparent);
+  filter: blur(7px);
+  animation: ckp-scan 9s linear infinite;
+}
+@keyframes ckp-scan {
+  0% { top: -170px; opacity: 0; }
+  8% { opacity: 0.85; }
+  92% { opacity: 0.85; }
+  100% { top: 100%; opacity: 0; }
+}
+.cockpit-particles {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+.cockpit-inner { position: relative; z-index: 1; }
+
+/* 极简工具行（标题已由顶栏承担，此处只保留状态/时钟/入口，高度约 30px） */
+.ckp-toolbar {
+  display: flex; align-items: center; justify-content: flex-end;
+  flex-wrap: nowrap; gap: 8px; margin-bottom: 10px; min-height: 26px;
+}
+.ckp-live {
+  margin-right: auto; display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: rgba(190, 214, 240, 0.5); letter-spacing: 0.02em;
+}
+.ckp-live i {
+  width: 6px; height: 6px; border-radius: 50%; background: #4fd0b0;
+  box-shadow: 0 0 8px rgba(79, 208, 176, 0.8); animation: ckp-pulse 2.4s ease-in-out infinite;
+}
+/* 同步中：圆点变旋转环 */
+.ckp-live i.ckp-spin {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: transparent !important;
+  border: 2px solid rgba(92, 178, 240, 0.25); border-top-color: #5cb2f0;
+  box-shadow: none !important; animation: ckp-spin 0.8s linear infinite;
+}
+.ckp-sync-time { color: rgba(190, 214, 240, 0.4); margin-left: 4px; }
+@keyframes ckp-spin { to { transform: rotate(360deg); } }
+
+.ckp-clock {
+  font-variant-numeric: tabular-nums; font-size: 11.5px; color: rgba(200, 222, 245, 0.7);
+  background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(125, 200, 255, 0.13);
+  border-radius: 8px; padding: 4px 10px; backdrop-filter: blur(8px);
+  display: flex; align-items: center; gap: 8px;
+}
+.ckp-clock b { color: #bfe6ff; font-weight: 600; }
+.ckp-flow {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 11.5px; color: rgba(200, 222, 245, 0.8);
+  border: 1px solid rgba(125, 200, 255, 0.16); background: rgba(255, 255, 255, 0.035);
+  border-radius: 8px; padding: 4px 10px; transition: border-color .2s, color .2s, background .2s;
+}
+.ckp-flow:hover {
+  border-color: rgba(125, 200, 255, 0.38); background: rgba(255, 255, 255, 0.07); color: #dff1ff;
+}
+@keyframes ckp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* 毛玻璃卡片：半透明磨砂 + 细细一圈淡蓝发光描边（层次强、干净、不刺眼） */
+.ckp-card {
+  position: relative;
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.028));
+  border: 1px solid rgba(120, 185, 250, 0.26);
+  backdrop-filter: blur(16px) saturate(130%);
+  -webkit-backdrop-filter: blur(16px) saturate(130%);
+  box-shadow:
+    0 10px 34px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(120, 185, 250, 0.12),        /* 整圈淡蓝细描边 */
+    0 0 22px rgba(64, 150, 255, 0.15);          /* 柔和蓝光 */
+  overflow: hidden;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s, border-color 0.3s;
+  height: 100%;
+}
+/* 顶部细发光边框 */
+.ckp-card::before {
+  content: '';
+  position: absolute; top: 0; left: 14px; right: 14px; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(120, 185, 250, 0.55), transparent);
+  opacity: 0.85;
+}
+.ckp-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(120, 185, 250, 0.42);
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 0 0 1px rgba(120, 185, 250, 0.22), 0 0 30px rgba(64, 150, 255, 0.22);
+}
+.ckp-card-pad { padding: 16px 18px; }
+
+/* 卡片标题 */
+.ckp-h {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; letter-spacing: 0.06em; color: #eaf6ff; font-weight: 600;
+  margin-bottom: 14px;
+}
+.ckp-h::before {
+  content: ''; width: 3px; height: 14px; border-radius: 2px;
+  background: linear-gradient(180deg, #5cb2f0, #3d8bea);
+  box-shadow: 0 0 8px rgba(92, 178, 240, 0.6);
+}
+
+/* KPI（紧凑：卡片内边距/图标/字号整体收一档） */
+.ckp-kpi-pad { padding: 11px 13px; display: flex; align-items: center; gap: 10px; }
+.ckp-kpi-val {
+  font-size: 25px; font-weight: 700; color: #eaf6ff; line-height: 1.12;
+  text-shadow: 0 0 14px rgba(56, 152, 246, 0.28); font-variant-numeric: tabular-nums;
+  display: flex; align-items: baseline; gap: 2px;
+}
+.ckp-kpi-unit { font-size: 12px; font-weight: 500; margin-left: 2px; color: rgba(200, 222, 245, 0.65); }
+.ckp-kpi-meta { font-size: 10.5px; margin-left: 5px; color: #8aa0bf; white-space: nowrap; }
+.ckp-kpi-label { font-size: 11.5px; color: rgba(190, 214, 240, 0.6); margin-bottom: 1px; white-space: nowrap; }
+.ckp-kpi-ico {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 17px; color: #eaf9ff;
+  box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.08), 0 0 16px rgba(56, 152, 246, 0.18);
+}
+
+/* 进度条 */
+.ckp-bar-track { height: 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
+.ckp-bar-fill {
+  height: 100%; border-radius: 6px;
+  box-shadow: 0 0 10px rgba(92, 178, 240, 0.5);
+  transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 预警行 */
+.ckp-alert-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px;
+  border: 1px solid transparent; cursor: pointer; transition: background 0.2s, border-color 0.2s;
+}
+.ckp-alert-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(125, 200, 255, 0.18);
+}
+.ckp-alert-title {
+  flex: 1; min-width: 0; font-size: 13px; color: #dbeafe;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ckp-alert-time { font-size: 11px; color: rgba(190, 214, 240, 0.5); flex-shrink: 0; }
+
+/* 能力导航小卡 */
+.ckp-cap {
+  display: flex; align-items: center; gap: 9px; padding: 10px 11px; border-radius: 11px;
+  border: 1px solid rgba(125, 200, 255, 0.14); background: rgba(255, 255, 255, 0.03);
+  cursor: pointer; transition: transform 0.22s, border-color 0.22s, box-shadow 0.22s, background 0.22s;
+}
+.ckp-cap:hover {
+  transform: translateY(-2px);
+  border-color: rgba(125, 200, 255, 0.34);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 18px rgba(56, 152, 246, 0.12);
+}
+.ckp-cap-ico {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 16px; color: #eaf9ff;
+  box-shadow: inset 0 0 14px rgba(255, 255, 255, 0.08);
+}
+.ckp-cap-t { font-size: 12.5px; font-weight: 600; color: #dbeafe; line-height: 1.25; }
+.ckp-cap-d { font-size: 10.5px; color: rgba(190, 214, 240, 0.55); line-height: 1.3; }
+
+/* 数据完整性总览 · 模块单元格（点击跳转补数据页面） */
+.ckp-int-cell {
+  padding: 9px 11px; border-radius: 10px;
+  border: 1px solid rgba(125, 200, 255, 0.12); background: rgba(255, 255, 255, 0.03);
+  cursor: pointer; transition: transform 0.22s, border-color 0.22s, background 0.22s;
+}
+.ckp-int-cell:hover {
+  transform: translateY(-2px);
+  border-color: rgba(125, 200, 255, 0.32);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 低调辉光角标（卡片右下角微弱光晕） */
+.ckp-card .ckp-glow {
+  position: absolute; right: -40px; bottom: -40px; width: 140px; height: 140px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(56, 152, 246, 0.10), transparent 70%);
+  pointer-events: none;
+}
+@keyframes ckp-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* KPI 数值变化时高亮脉冲（蓝青描边 + 外发光，1.1s 后回落） */
+.ckp-card--flash {
+  animation: ckp-flash 1.1s ease-out;
+}
+@keyframes ckp-flash {
+  0% { box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.07); }
+  22% { box-shadow: 0 0 0 2px rgba(92, 178, 240, 0.55), 0 0 26px rgba(92, 178, 240, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.07); }
+  100% { box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.07); }
+}
+/* 预警高亮：正常蓝色，超期/高级恒亮红闪，中级/临期橙闪，重点一眼抓到 */
+.ckp-alert-row.ckp-alert-danger {
+  border-color: rgba(240, 138, 158, 0.42);
+  background: rgba(240, 138, 158, 0.055);
+  animation: ckp-alert-blink 1.8s ease-in-out infinite;
+}
+.ckp-alert-row.ckp-alert-warn {
+  border-color: rgba(232, 185, 104, 0.42);
+  background: rgba(232, 185, 104, 0.05);
+  animation: ckp-alert-blink-amber 1.8s ease-in-out infinite;
+}
+@keyframes ckp-alert-blink {
+  0%, 100% { box-shadow: inset 0 0 0 rgba(240, 138, 158, 0); border-color: rgba(240, 138, 158, 0.22); }
+  50% { box-shadow: inset 0 0 16px rgba(240, 138, 158, 0.20); border-color: rgba(240, 138, 158, 0.55); }
+}
+@keyframes ckp-alert-blink-amber {
+  0%, 100% { box-shadow: inset 0 0 0 rgba(232, 185, 104, 0); border-color: rgba(232, 185, 104, 0.22); }
+  50% { box-shadow: inset 0 0 16px rgba(232, 185, 104, 0.18); border-color: rgba(232, 185, 104, 0.55); }
+}
+/* KPI 预警卡片：有超期时整卡红色呼吸光圈，突出紧迫 */
+.ckp-card--alert {
+  border-color: rgba(240, 138, 158, 0.5) !important;
+  animation: ckp-card-alert 2.2s ease-in-out infinite;
+}
+@keyframes ckp-card-alert {
+  0%, 100% { box-shadow: 0 10px 34px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.07), 0 0 0 1px rgba(240,138,158,.14), 0 0 18px rgba(240,138,158,.18); }
+  50% { box-shadow: 0 10px 34px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.07), 0 0 0 1px rgba(240,138,158,.32), 0 0 28px rgba(240,138,158,.36); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ckp-card--flash { animation: none; }
+  .cockpit-scan { display: none; }
+  .ckp-alert-row.ckp-alert-danger,
+  .ckp-alert-row.ckp-alert-warn,
+  .ckp-card--alert { animation: none; }
+}
