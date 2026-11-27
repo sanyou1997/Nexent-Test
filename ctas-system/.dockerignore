@@ -14,3 +14,4 @@ backend/web-ctas/**/*.map
 db_fix*.py
 apply_replace.py
 *.bat
+backups

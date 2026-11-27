@@ -15,6 +15,32 @@ echo "[1/4] 克隆业务库 → ctas_check ..."
 $X docker exec ctas-db sh -c 'dropdb -U ctas --if-exists ctas_check && createdb -U ctas ctas_check && pg_dump -U ctas ctas | psql -q -U ctas -d ctas_check >/dev/null'
 trap '$X docker exec ctas-db dropdb -U ctas --if-exists ctas_check >/dev/null 2>&1 || true' EXIT
 
+# 检查用演示账号登录。正式环境按要求改过演示账号密码、停用了账号或部门后，只在克隆库里把它们恢复为默认，业务库不受影响
+echo "      克隆库内恢复演示账号（默认密码、启用、默认部门）..."
+$X docker exec -i -w /app ctas sh -c 'DATABASE_URL="${DATABASE_URL%/ctas}/ctas_check" python -' <<'PY'
+import os
+assert os.environ["DATABASE_URL"].endswith("/ctas_check"), "只允许在克隆库上运行"
+from app.database import SessionLocal
+from app.models import Department, User
+from app.security import hash_password
+from app.seed import USERS
+from app.tenancy import ROLE_DEFAULT_DEPT
+
+B = {"tenancy_bypass": True}
+db = SessionLocal()
+depts = {d.code: d for d in db.query(Department).execution_options(**B)}
+for username, password, real_name, role in USERS:
+    u = db.query(User).execution_options(**B).filter(User.username == username).first()
+    if u is None:
+        u = User(username=username, real_name=real_name)
+        db.add(u)
+    d = depts.get(ROLE_DEFAULT_DEPT.get(role))
+    u.password_hash, u.role, u.is_active = hash_password(password), role, True
+    if d is not None:
+        u.dept_id, d.enabled = d.id, True
+db.commit()
+PY
+
 echo "[2/4] 拷入测试样本 ..."
 $X docker exec ctas rm -rf /tmp/testdata
 (cd "$ROOT" && tar -cf - testdata) | $X docker exec -i ctas tar -C /tmp -xf -

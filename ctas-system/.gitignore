@@ -26,3 +26,6 @@ backend/app/data/
 
 # 功能检查结果（scripts/run_checks.sh 生成）
 scripts/platform_check.json
+
+# scripts/deploy.sh 升级前的数据库备份
+/backups/

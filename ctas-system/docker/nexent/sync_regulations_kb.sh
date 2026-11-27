@@ -6,6 +6,8 @@ set -e
 EMAIL="${1:?用法：sync_regulations_kb.sh <租户管理员邮箱> [知识库名称]}"
 KB="${2:-纪检监察业务平台法规库}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# docker cp 的宿主机路径：Git Bash 下用 Windows 形式，调用方设了 MSYS_NO_PATHCONV=1 时也能找到文件
+case "$(uname -s)" in MINGW*|MSYS*) HERE="$(cd "$HERE" && pwd -W)";; esac
 # Windows Git Bash 下避免把容器内路径（/tmp、/app）改写成 Windows 路径；Linux 下无影响
 X="env MSYS_NO_PATHCONV=1"
 

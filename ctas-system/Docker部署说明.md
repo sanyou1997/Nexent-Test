@@ -148,7 +148,33 @@ docker exec ctas-db pg_restore -U ctas -d ctas --clean --if-exists /tmp/ctas-db.
 
 ## 九、在已有 Nexent 的环境上部署 / 升级（git pull 之后）
 
-按顺序检查，已做过的步骤跳过即可（脚本均幂等）。
+**一条命令（推荐）**：部署机上，在 Nexent-Test 根目录执行：
+
+```sh
+git pull --ff-only
+sh ctas-system/scripts/deploy.sh <Nexent 账号邮箱>     # 首次；邮箱记入 .env，以后升级可省略
+```
+
+脚本可重复执行，已完成的步骤自动跳过，下面第 1–6、8 步中能自动化的部分都由它完成：
+- 检查 Docker、Nexent 容器与网络；
+- 首次生成 `.env`（随机密钥，`CTAS_BIND=0.0.0.0`）；
+- 升级前把业务库备份到 `backups/`（保留最近 10 份）；
+- 构建并启动；
+- 接入 Nexent：
+  - 把该账号已有的 API Key 写入平台，没有才新建；Key 不显示，也不会作废该账号的其他 Key；
+  - 关闭该账号的智能体记忆；
+  - 建识别服务只读账号；
+  - 同步法规知识库，注册 MCP，安装场景智能体。
+
+接入在 `nexent-config` 容器内按邮箱调用 Nexent 自身的服务函数，不需要账号密码。该账号须已在 Nexent 配好对话模型和向量模型。
+
+- Nexent 覆盖文件有更新时加 `--nexent`，先运行 `restore.py start`；
+- 加 `--check` 跑全模块功能检查；
+- 加 `--keep-memory` 保留智能体记忆。
+
+脚本完成后只剩人工操作：admin 登录改密码、调整部门与账号（第 7 步）、在「Nexent 接入 → 场景智能体」逐个实测。
+
+以下为手动步骤，用于脚本失败时排查或单独执行某一步。按顺序检查，已做过的步骤跳过即可（脚本均幂等）。
 
 **0. 取得代码**：业务平台随 Nexent 部署仓库 [Nexent-Test](https://github.com/sanyou1997/Nexent-Test) 的 `ctas-system/` 子目录发布。
 
