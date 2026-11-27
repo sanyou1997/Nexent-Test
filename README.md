@@ -82,6 +82,19 @@ python -X utf8 restore.py start
 python -X utf8 restore.py review-settings --account $account
 ```
 
+## 纪检监察业务辅助平台（ctas-system）
+
+`ctas-system/` 是与本机 Nexent 同机运行的业务平台，包含信访、审查调查、案件审理、巡察、监督等业务模块，业务数据按部门隔离。平台的场景智能体、法规知识库和 MCP 工具都接入本机 Nexent。平台用独立的 Compose 项目 `ctas` 部署，默认端口 8090，`restore.py` 不会改动它。完整步骤见 [ctas-system/Docker部署说明.md](ctas-system/Docker部署说明.md) 第九节。
+
+首次部署前先确认 Nexent 正常运行。在 `ctas-system/` 下由 `.env.docker.example` 复制出 `.env`，将 `CTAS_SECRET_KEY`、`CTAS_DB_PASSWORD`、`CTAS_MCP_TOKEN` 各设为随机长字符串。需要其他机器访问时，再设 `CTAS_BIND=0.0.0.0`。然后启动：
+
+```powershell
+cd ctas-system
+docker compose up -d --build
+```
+
+启动后按部署说明第九节操作：在 Nexent 生成 API 密钥并填入平台，同步法规知识库，注册 MCP，安装场景智能体。以后更新时，在本项目根目录运行 `git pull --ff-only`，再到 `ctas-system/` 下运行 `docker compose up -d --build`。保留已有的 `.env`，因为数据库密码已写入数据卷。此目录的代码由开发仓库的 `scripts/publish_to_nexent_test.sh` 同步，请在开发仓库修改，不要直接改这里。
+
 ## 数据库与账号的关系
 
 单独导出的智能体 JSON 可以备份界面里的智能体配置。法条原件、检索索引、引用预览所用的对象地址、MCP 服务程序和模型权重分别保存在其他位置。迁移本项目时先恢复原件和服务，再生成目标租户的智能体 JSON。导入后的最后一步是发布并运行 `bind`。如果只更新同一部署的代码，原有账号和数据卷可以继续使用。
